@@ -1,0 +1,11 @@
+pandas
+numpy
+python-telegram-bot>=20.0
+scikit-learn
+python-dotenv
+mplfinance
+schedule
+joblib
+ccxt
+talib-binary
+tenacity # Added for retry mechanisms (Good Practice)
