@@ -7,5 +7,6 @@ mplfinance
 schedule
 joblib
 ccxt
-talib-binary
-tenacity # Added for retry mechanisms (Good Practice)
+-talib-binary 
++TA-Lib
+tenacity
