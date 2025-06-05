@@ -158,82 +158,112 @@ perform_installation() {
     sudo chmod u+x "$INSTALL_DIR"/*.sh "$INSTALL_DIR/main.py" "$INSTALL_DIR/train_model.py" || true
     log_success "Project in $INSTALL_DIR. Permissions set."
 
+# ... (within perform_installation function in install_and_manage.sh) ...
+
     log_info "4. Setting up Python virtual environment..."
     
-    # --- MODIFIED SECTION: Create a temporary script to run as bot_user ---
-    # Content of the script to be run by the bot_user
-    # Note the use of $1, $2, $3, $4 for positional parameters passed to this inner script
     VENV_SETUP_SCRIPT_CONTENT=$(cat << EOF_INNER_SCRIPT
 #!/bin/bash
-set -e 
-# Parameters passed from the main script:
-# \$1: INSTALL_DIR_SUB
-# \$2: VENV_NAME_SUB
-# \$3: PYTHON_EXEC_SUB
-# \$4: PIP_EXEC_SUB
+set -ex # Add -x for xtrace to see commands being run, -e for exit on error
 
-# For debugging, print received arguments and current user/directory
-echo "[VENV_SCRIPT] Running as user: \$(whoami)"
-echo "[VENV_SCRIPT] Initial working directory: \$(pwd)"
+echo "[VENV_SCRIPT] Running as user: \$(whoami) in dir: \$(pwd)"
 echo "[VENV_SCRIPT] Received INSTALL_DIR_SUB: \$1"
-echo "[VENV_SCRIPT] Received VENV_NAME_SUB: \$2"
-echo "[VENV_SCRIPT] Received PYTHON_EXEC_SUB: \$3"
-echo "[VENV_SCRIPT] Received PIP_EXEC_SUB: \$4"
+# (other echo statements for args for debugging)
 
-cd "\$1" # Use the first argument passed to the script for INSTALL_DIR
+cd "\$1" 
 echo "[VENV_SCRIPT] Changed to directory: \$(pwd)"
 
-if [ ! -d "\$2" ]; then # Use the second argument for VENV_NAME
+if [ ! -d "\$2" ]; then
     echo "[VENV_SCRIPT] Creating venv '\$2'..."
-    \$3 -m venv "\$2" # Use third arg for PYTHON_EXEC
+    \$3 -m venv "\$2" 
 fi
 echo "[VENV_SCRIPT] Activating venv..."
 source "\$2/bin/activate"
 
 echo "[VENV_SCRIPT] Upgrading Pip..."
-\$4 install --upgrade pip # Use fourth arg for PIP_EXEC
+\$4 install --upgrade pip
 
 echo "[VENV_SCRIPT] Installing dependencies from requirements.txt..."
 if [ -f "requirements.txt" ]; then
     echo "[VENV_SCRIPT] Ensuring numpy is installed first..."
     \$4 install numpy --no-cache-dir
 
-    echo "[VENV_SCRIPT] Installing TA-Lib with LDFLAGS=-L/lib ..."
-    LDFLAGS="-L/lib" \$4 install TA-Lib --no-cache-dir --verbose
-    
+    echo "[VENV_SCRIPT] Attempting to install TA-Lib Python wrapper..."
+    # Check if ta-lib-config exists and provides useful info
+    if command -v ta-lib-config &> /dev/null; then
+        echo "[VENV_SCRIPT] Found ta-lib-config. Output:"
+        echo "ta-lib-config --cflags: \$(ta-lib-config --cflags)"
+        echo "ta-lib-config --libs: \$(ta-lib-config --libs)"
+        # Use flags from ta-lib-config if it looks reasonable
+        # Example: TA_CFLAGS=\$(ta-lib-config --cflags) TA_LIBS=\$(ta-lib-config --libs)
+        # However, since ldconfig -p showed /lib, let's be explicit.
+    else
+        echo "[VENV_SCRIPT] ta-lib-config not found in PATH for user \$(whoami). Will try manual flags."
+    fi
+
+    # Set environment variables for the TA-Lib build
+    # These tell the compiler where to find headers and the linker where to find the library.
+    # Since your `ldconfig -p` showed /lib, we prioritize that.
+    # Headers are typically in /usr/include/ta-lib if installed with --prefix=/usr
+    export C_INCLUDE_PATH="/usr/include/ta-lib:\$C_INCLUDE_PATH"
+    export CPLUS_INCLUDE_PATH="/usr/include/ta-lib:\$CPLUS_INCLUDE_PATH"
+    export LIBRARY_PATH="/lib:/usr/lib:/usr/local/lib:\$LIBRARY_PATH" # Add common paths
+    export LD_RUN_PATH="/lib:/usr/lib:/usr/local/lib:\$LD_RUN_PATH"   # For runtime linking as well
+
+    # More aggressive LDFLAGS
+    export LDFLAGS="-L/lib -L/usr/lib -L/usr/local/lib"
+    # More aggressive CFLAGS if headers are an issue (usually /usr/include is checked by default)
+    export CFLAGS="-I/usr/include -I/usr/local/include -I/usr/include/ta-lib" 
+
+    echo "[VENV_SCRIPT] Environment for TA-Lib build:"
+    echo "LDFLAGS: \$LDFLAGS"
+    echo "CFLAGS: \$CFLAGS"
+    echo "C_INCLUDE_PATH: \$C_INCLUDE_PATH"
+    echo "LIBRARY_PATH: \$LIBRARY_PATH"
+
+    # Try installing TA-Lib directly. The --verbose flag is crucial for debugging.
+    # Using --no-binary TA-Lib to force source build, though it should do that anyway if no wheel.
+    echo "[VENV_SCRIPT] Installing TA-Lib (forcing source build attempt)..."
+    \$4 install TA-Lib --no-cache-dir --no-binary TA-Lib --compile --verbose
+
     echo "[VENV_SCRIPT] TA-Lib wrapper install attempt finished."
+    
+    # Verify TA-Lib import immediately
+    echo "[VENV_SCRIPT] Verifying TA-Lib Python import immediately after install..."
+    python -c "import talib; print(\\\"[VENV_SCRIPT SUCCESS] TA-Lib Python package imported successfully after direct install.\\\")" || \
+        (echo "[VENV_SCRIPT ERROR] TA-Lib Python import FAILED after direct install! Check verbose pip output above." && exit 1)
+
     echo "[VENV_SCRIPT] Installing other requirements..."
-    \$4 install -r requirements.txt
+    \$4 install -r requirements.txt # This will see TA-Lib is installed and skip it.
 else
     echo "[VENV_SCRIPT ERROR] requirements.txt not found!"
     exit 1
 fi
 
-echo "[VENV_SCRIPT] Verifying TA-Lib Python import..."
-python -c "import talib; print(\\\"[VENV_SCRIPT SUCCESS] TA-Lib Python package imported successfully.\\\")" || \
-    (echo "[VENV_SCRIPT ERROR] TA-Lib Python import FAILED! This is the final check." && exit 1)
+# Final check is good, but we added one earlier too.
+# echo "[VENV_SCRIPT] Verifying TA-Lib Python import (final)..."
+# python -c "import talib; print(\\\"[VENV_SCRIPT SUCCESS] TA-Lib Python package imported successfully (final check).\\\")" || \
+#     (echo "[VENV_SCRIPT ERROR] TA-Lib Python import FAILED! This is the final check." && exit 1)
 
 deactivate
 echo "[VENV_SCRIPT] Virtual environment setup complete."
 EOF_INNER_SCRIPT
 )
 
-    TMP_SCRIPT_PATH="/tmp/flowai_venv_setup.sh" # More unique name
+    TMP_SCRIPT_PATH="/tmp/flowai_venv_setup.sh" 
     echo "$VENV_SETUP_SCRIPT_CONTENT" | sudo tee "$TMP_SCRIPT_PATH" > /dev/null
-    sudo chmod 755 "$TMP_SCRIPT_PATH" # Make executable for user/group/other for simplicity with sudo -u
-    # No need to chown the script itself to bot_user, as root is creating it and sudo -u will execute it.
+    sudo chmod 755 "$TMP_SCRIPT_PATH" 
 
-    # Execute the temporary script as the bot_user, passing necessary variables as arguments
-    # The `bash` command invoked by `sudo -u` will take the script path as its first real argument,
-    # and then $INSTALL_DIR, $VENV_NAME etc. become $1, $2 within that script.
     log_info "Executing venv setup script as user '$BOT_USER' with args: $INSTALL_DIR $VENV_NAME $PYTHON_EXECUTABLE $PIP_EXECUTABLE"
     if ! sudo -H -u "$BOT_USER" bash "$TMP_SCRIPT_PATH" "$INSTALL_DIR" "$VENV_NAME" "$PYTHON_EXECUTABLE" "$PIP_EXECUTABLE"; then
         log_fatal "Virtual environment setup or dependency installation failed using temporary script. Check output above."
     fi
     sudo rm -f "$TMP_SCRIPT_PATH" 
-    # --- END OF MODIFIED SECTION ---
-
+    
     log_success "Python virtual environment and dependencies set up."
+    # ... (rest of perform_installation)
+
+# ... (rest of the install_and_manage.sh script: management functions, main_menu, etc.)
 
     # ... (Rest of perform_installation: directory structure, .env, systemd) ...
     # (Same as before)
