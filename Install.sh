@@ -116,29 +116,30 @@ install_talib_c_library() {
 
 
 # --- Core Installation Function ---
+# ... (script above this point) ...
+
+# --- Core Installation Function ---
 perform_installation() {
     set -e # Enable strict error checking for installation phase
     log_info "Starting Core Installation Process..."
 
     prompt_with_default "Enter installation directory" "$INSTALL_DIR_DEFAULT" INSTALL_DIR
     prompt_with_default "Enter dedicated username for the bot" "$BOT_USER_DEFAULT" BOT_USER
-    PROJECT_ROOT="$INSTALL_DIR" # Update project root if different from script location
+    PROJECT_ROOT="$INSTALL_DIR" 
 
     log_info "1. Installing System Prerequisites..."
+    # ... (prerequisite installation logic as before) ...
     install_package_if_missing "git" "git" "Git" || log_fatal "Git installation failed."
     install_package_if_missing "$PYTHON_EXECUTABLE" "python3" "Python 3" || log_fatal "Python 3 installation failed."
     if ! $PYTHON_EXECUTABLE -m pip --version &> /dev/null; then
         install_package_if_missing "pip3" "python3-pip" "Pip for Python 3" || log_fatal "Pip3 installation failed."
     fi
     PIP_EXECUTABLE="${PYTHON_EXECUTABLE} -m pip"
-    # Check for python3-venv by trying to use it, package name varies too much
     if ! $PYTHON_EXECUTABLE -m venv -h &> /dev/null; then
          install_package_if_missing "python3-venv-dummy" "python3-venv" "Python 3 Venv module (python3-venv)" || \
          install_package_if_missing "python3-virtualenv-dummy" "python-virtualenv" "Python 3 Venv module (python-virtualenv)" || \
          log_fatal "Python3 venv module installation failed."
     fi
-
-    # Build tools & other TA-Lib dependencies
     if command -v apt-get &> /dev/null; then
         sudo apt-get install -y -qq build-essential libffi-dev python3-dev wget tar || log_fatal "Failed to install build tools (apt)."
     elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
@@ -147,7 +148,6 @@ perform_installation() {
     fi
     log_success "System prerequisites checked/installed."
 
-    # Install TA-Lib C Library (Needed before pip install TA-Lib if talib-binary fails)
     install_talib_c_library || log_fatal "TA-Lib C library installation failed. This is critical for TA-Lib Python package."
 
     log_info "2. Creating dedicated user '$BOT_USER'..."
@@ -158,7 +158,7 @@ perform_installation() {
     log_info "3. Setting up project directory at $INSTALL_DIR..."
     if [ -d "$INSTALL_DIR/.git" ]; then
         log_warning "Project dir $INSTALL_DIR exists. Attempting git pull..."
-        cd "$INSTALL_DIR"; sudo -u "$BOT_USER" git pull || log_warning "git pull failed. Continuing."; cd "$OLDPWD"
+        (cd "$INSTALL_DIR" && sudo -u "$BOT_USER" git pull) || log_warning "git pull failed. Continuing."
     elif [ -d "$INSTALL_DIR" ]; then
         log_warning "Dir $INSTALL_DIR exists but not a git repo. Using existing dir."
     else
@@ -167,19 +167,13 @@ perform_installation() {
     sudo chown -R "$BOT_USER":"$BOT_USER" "$INSTALL_DIR"
     sudo find "$INSTALL_DIR" -type d -exec chmod 750 {} \;
     sudo find "$INSTALL_DIR" -type f -exec chmod 640 {} \;
-    # Make shell scripts in the root executable by the owner (root at this stage of install script)
-    # and by the bot_user after chown
     sudo chmod u+x "$INSTALL_DIR"/*.sh || true
-    # The bot user will need execute permission on main.py and train_model.py
-    sudo -u "$BOT_USER" chmod u+x "$INSTALL_DIR/main.py" || true
-    sudo -u "$BOT_USER" chmod u+x "$INSTALL_DIR/train_model.py" || true
+    sudo -u "$BOT_USER" chmod u+x "$INSTALL_DIR/main.py" "$INSTALL_DIR/train_model.py" || true
     log_success "Project in $INSTALL_DIR. Permissions set."
 
     log_info "4. Setting up Python virtual environment..."
-    # Run commands as the bot user
-    # Using a heredoc for multi-line commands as bot_user
     if ! sudo -u "$BOT_USER" bash -s -- "$INSTALL_DIR" "$VENV_NAME" "$PYTHON_EXECUTABLE" "$PIP_EXECUTABLE" << 'EOF_BOT_SCRIPT'
-        set -e # Strict error checking within this sub-script
+        set -e 
         INSTALL_DIR_SUB="$1"
         VENV_NAME_SUB="$2"
         PYTHON_EXEC_SUB="$3"
@@ -198,14 +192,9 @@ perform_installation() {
         
         echo "[VENV] Installing dependencies from requirements.txt..."
         if [ -f "requirements.txt" ]; then
-            # Try installing TA-Lib (wrapper) first, then others.
-            # If talib-binary fails, the C library should allow TA-Lib to build.
             echo "[VENV] Attempting to install TA-Lib Python wrapper..."
             $PIP_EXEC_SUB install TA-Lib --no-cache-dir 
             echo "[VENV] TA-Lib wrapper install attempt finished. Installing other requirements..."
-            # Install other requirements, potentially skipping talib-binary if TA-Lib already installed
-            # Or, keep talib-binary and if it fails, the previous TA-Lib should suffice.
-            # For simplicity, just run the full requirements. If TA-Lib is met, pip will skip it.
             $PIP_EXEC_SUB install -r requirements.txt
         else
             echo "[VENV ERROR] requirements.txt not found!"
@@ -234,19 +223,25 @@ EOF_BOT_SCRIPT
     log_success "Directory structure ensured."
 
     log_info "6. Configuration File (.env) Setup..."
-    # (Env file setup as before)
     ENV_FILE="$INSTALL_DIR/.env"
     ENV_EXAMPLE_FILE="$INSTALL_DIR/.env.example"
-    if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_EXAMPLE_FILE" ]; then
-        sudo cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
-        sudo chown "$BOT_USER":"$BOT_USER" "$ENV_FILE"
-        sudo chmod 600 "$ENV_FILE"
-        log_warning "Copied .env.example to .env. YOU MUST EDIT $ENV_FILE with your settings."
-    elif [ -f "$ENV_FILE" ]; log_info ".env file already exists."; else
-        log_warning ".env.example not found. Create $ENV_FILE manually."; fi
+
+    # --- CORRECTED SECTION ---
+    if [ ! -f "$ENV_FILE" ]; then # If .env does NOT exist
+        if [ -f "$ENV_EXAMPLE_FILE" ]; then # And .env.example DOES exist
+            sudo cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
+            sudo chown "$BOT_USER":"$BOT_USER" "$ENV_FILE"
+            sudo chmod 600 "$ENV_FILE"
+            log_warning "Copied .env.example to .env. YOU MUST EDIT $ENV_FILE with your actual settings."
+        else # .env.example also does not exist
+            log_warning ".env.example not found. Please create $ENV_FILE manually with required settings."
+        fi
+    else # .env ALREADY exists
+        log_info ".env file already exists at $ENV_FILE. Please ensure it's correctly configured."
+    fi
+    # --- END OF CORRECTED SECTION ---
 
     log_info "7. Setting up systemd service '$SERVICE_NAME'..."
-    # (Systemd service setup as before)
     SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
     SYSTEMD_SERVICE_CONTENT="[Unit]
 Description=$PROJECT_NAME Service
@@ -273,12 +268,16 @@ WantedBy=multi-user.target
     sudo systemctl enable "$SERVICE_NAME"
     log_success "Systemd service '$SERVICE_NAME.service' created and enabled."
 
-    set +e # Disable strict error checking for menu part
+    set +e 
     log_info "--- Core Installation Finished ---"
-    echo "Installation directory: $INSTALL_DIR" # Save for menu
-    echo "Bot user: $BOT_USER"                 # Save for menu
+    # Store INSTALL_DIR and BOT_USER globally for the menu if installation was successful
+    # These globals are mainly for the menu if it's run in the same script invocation.
+    # If script is run again, menu tries to detect from service file.
+    # No need to explicitly set them globally if perform_installation is only called once.
     read -p "Press [Enter] to return to the main menu (or script will exit if run with --install-only)..."
 }
+
+# ... (rest of the script: management functions, main_menu, execution logic) ...
 
 # --- Management Functions (manage_service, view_logs, display_status_snapshot, edit_env_file, train_ai_model_interactive) ---
 # (These functions remain largely the same as in the previous script version)
