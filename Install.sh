@@ -99,80 +99,173 @@ install_talib_c_library() {
 # ... (script above this point, including install_talib_c_library as previously refined) ...
 
 # --- Core Installation Function ---
+# ... (script above this point, including install_talib_c_library) ...
+
+# --- Core Installation Function ---
 perform_installation() {
-    # ... (initial parts of perform_installation as before) ...
-    # ... (prerequisites, user creation, git clone, C library install) ...
+    set -e 
+    log_info "Starting Core Installation Process..."
+    prompt_with_default "Enter installation directory" "$INSTALL_DIR_DEFAULT" LOCAL_INSTALL_DIR
+    prompt_with_default "Enter dedicated username for the bot" "$BOT_USER_DEFAULT" LOCAL_BOT_USER
+    
+    INSTALL_DIR="$LOCAL_INSTALL_DIR"
+    BOT_USER="$LOCAL_BOT_USER"
+    PROJECT_ROOT="$INSTALL_DIR" 
+
+    # ... (Prerequisites, TA-Lib C install, User creation, Git clone - same as before) ...
+    log_info "1. Installing System Prerequisites..."
+    install_package_if_missing "git" "git" "Git" || log_fatal "Git failed."
+    install_package_if_missing "$PYTHON_EXECUTABLE" "python3" "Python 3" || log_fatal "Python 3 failed."
+    if ! $PYTHON_EXECUTABLE -m pip --version &> /dev/null; then
+        install_package_if_missing "pip3" "python3-pip" "Pip for Python 3" || log_fatal "Pip3 failed."
+    fi
+    PIP_EXECUTABLE="${PYTHON_EXECUTABLE} -m pip"
+    if ! $PYTHON_EXECUTABLE -m venv -h &> /dev/null; then
+         install_package_if_missing "python3-venv" "python3-venv" || \
+         install_package_if_missing "python-virtualenv" "python-virtualenv" || \
+         log_fatal "Python3 venv module failed."
+    fi
+    BUILD_TOOLS_APT="build-essential libffi-dev python3-dev wget tar automake autoconf pkg-config"
+    BUILD_TOOLS_YUM="gcc make gcc-c++ autoconf automake libtool libffi-devel python3-devel openssl-devel wget tar pkgconfig"
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get install -y -qq $BUILD_TOOLS_APT || log_fatal "Build tools (apt) failed."
+    elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+        sudo yum install -y $BUILD_TOOLS_YUM > /dev/null 2>&1 || sudo dnf install -y $BUILD_TOOLS_YUM > /dev/null 2>&1 || log_warning "Some build/dev pkgs (yum/dnf) failed."
+    fi
+    log_success "System prerequisites checked/installed."
+
+    install_talib_c_library || log_fatal "TA-Lib C library installation FAILED. Cannot proceed."
+
+    log_info "2. Creating dedicated user '$BOT_USER'..."
+    if id "$BOT_USER" &>/dev/null; then log_info "User '$BOT_USER' exists."; else
+        sudo useradd -r -m -d "/home/$BOT_USER" -s /bin/bash "$BOT_USER" || log_fatal "User create failed."
+        log_success "User '$BOT_USER' created."; fi
+
+    log_info "3. Setting up project directory at $INSTALL_DIR..."
+    if [ -d "$INSTALL_DIR/.git" ]; then
+        log_warning "Project dir $INSTALL_DIR exists. Pulling..."
+        (cd "$INSTALL_DIR" && sudo -u "$BOT_USER" git pull) || log_warning "git pull failed."
+    elif [ -d "$INSTALL_DIR" ]; then
+        log_warning "Dir $INSTALL_DIR exists (not git). Using it."
+    else
+        sudo git clone "$GITHUB_REPO_URL" "$INSTALL_DIR" || log_fatal "Clone $GITHUB_REPO_URL failed."
+    fi
+    sudo chown -R "$BOT_USER":"$BOT_USER" "$INSTALL_DIR"
+    sudo find "$INSTALL_DIR" -type d -exec chmod 750 {} \;
+    sudo find "$INSTALL_DIR" -type f -exec chmod 640 {} \;
+    sudo chmod u+x "$INSTALL_DIR"/*.sh "$INSTALL_DIR/main.py" "$INSTALL_DIR/train_model.py" || true
+    log_success "Project in $INSTALL_DIR. Permissions set."
+
 
     log_info "4. Setting up Python virtual environment..."
-    # Using heredoc for bot user script
-    # Ensure requirements.txt has "TA-Lib" and NOT "talib-binary"
-    if ! sudo -u "$BOT_USER" bash -s -- "$INSTALL_DIR" "$VENV_NAME" "$PYTHON_EXECUTABLE" "$PIP_EXECUTABLE" << 'EOF_BOT_VENV_SCRIPT'
-        set -e 
-        INSTALL_DIR_SUB="$1"; VENV_NAME_SUB="$2"; PYTHON_EXEC_SUB="$3"; PIP_EXEC_SUB="$4"
-        
-        echo "[VENV] Current directory: $(pwd)" # Should be /tmp or similar for sudo -s
-        # Ensure we are in the correct directory for the script
-        cd "$INSTALL_DIR_SUB"
-        echo "[VENV] Changed to directory: $(pwd)"
+    
+    # --- MODIFIED SECTION: Create a temporary script to run as bot_user ---
+    VENV_SETUP_SCRIPT_CONTENT=$(cat << EOF_INNER_SCRIPT
+#!/bin/bash
+set -e 
+INSTALL_DIR_SUB="$1"
+VENV_NAME_SUB="$2"
+PYTHON_EXEC_SUB="$3"
+PIP_EXEC_SUB="$4"
 
-        if [ ! -d "$VENV_NAME_SUB" ]; then
-            echo "[VENV] Creating venv '$VENV_NAME_SUB'..."
-            $PYTHON_EXEC_SUB -m venv "$VENV_NAME_SUB"
-        fi
-        echo "[VENV] Activating venv..."
-        source "$VENV_NAME_SUB/bin/activate"
-        
-        echo "[VENV] Upgrading Pip..."
-        $PIP_EXEC_SUB install --upgrade pip
-        
-        echo "[VENV] Installing dependencies from requirements.txt..."
-        if [ -f "requirements.txt" ]; then
-            # --- MODIFIED SECTION FOR TA-LIB INSTALL ---
-            echo "[VENV] Attempting to install TA-Lib Python wrapper with explicit LDFLAGS..."
-            # Since ldconfig found libta_lib.so in /lib, we point LDFLAGS there.
-            # If it was in /usr/lib, it would be -L/usr/lib. If /usr/local/lib, then -L/usr/local/lib.
-            # The TA-Lib C library headers are usually in /usr/include/ta-lib/ or /usr/local/include/ta-lib/
-            # CFLAGS might be needed if headers are not found: CFLAGS="-I/usr/include/ta-lib" 
-            # However, /usr/include is usually standard.
-            
-            # First, ensure numpy is installed as TA-Lib setup depends on it
-            echo "[VENV] Ensuring numpy is installed first..."
-            $PIP_EXEC_SUB install numpy --no-cache-dir
+echo "[VENV_SCRIPT] Running as user: \$(whoami) in dir: \$(pwd)"
+cd "\$INSTALL_DIR_SUB"
+echo "[VENV_SCRIPT] Changed to directory: \$(pwd)"
 
-            echo "[VENV] Installing TA-Lib with LDFLAGS=-L/lib ..."
-            LDFLAGS="-L/lib" $PIP_EXEC_SUB install TA-Lib --no-cache-dir --verbose
-            # If the above fails, and headers are suspected, you could try:
-            # CFLAGS="-I/usr/include/ta-lib" LDFLAGS="-L/lib" $PIP_EXEC_SUB install TA-Lib --no-cache-dir --verbose
-            
-            echo "[VENV] TA-Lib wrapper install attempt finished."
-            echo "[VENV] Installing other requirements..."
-            $PIP_EXEC_SUB install -r requirements.txt # This will re-check TA-Lib, but it should be satisfied
-            # --- END OF MODIFIED SECTION ---
-        else
-            echo "[VENV ERROR] requirements.txt not found!"
-            exit 1
-        fi
-        
-        echo "[VENV] Verifying TA-Lib Python import..."
-        python -c "import talib; print(\"[VENV SUCCESS] TA-Lib Python package imported successfully.\")" || \
-            (echo "[VENV ERROR] TA-Lib Python import FAILED! This is the final check." && exit 1)
-        
-        deactivate
-        echo "[VENV] Virtual environment setup complete."
-EOF_BOT_VENV_SCRIPT
-    then
-        log_fatal "Virtual environment or dependency installation failed. Check output above."
+if [ ! -d "\$VENV_NAME_SUB" ]; then
+    echo "[VENV_SCRIPT] Creating venv '\$VENV_NAME_SUB'..."
+    \$PYTHON_EXEC_SUB -m venv "\$VENV_NAME_SUB"
+fi
+echo "[VENV_SCRIPT] Activating venv..."
+source "\$VENV_NAME_SUB/bin/activate"
+
+echo "[VENV_SCRIPT] Upgrading Pip..."
+\$PIP_EXEC_SUB install --upgrade pip
+
+echo "[VENV_SCRIPT] Installing dependencies from requirements.txt..."
+if [ -f "requirements.txt" ]; then
+    echo "[VENV_SCRIPT] Ensuring numpy is installed first..."
+    \$PIP_EXEC_SUB install numpy --no-cache-dir
+
+    echo "[VENV_SCRIPT] Installing TA-Lib with LDFLAGS=-L/lib ..."
+    LDFLAGS="-L/lib" \$PIP_EXEC_SUB install TA-Lib --no-cache-dir --verbose
+    
+    echo "[VENV_SCRIPT] TA-Lib wrapper install attempt finished."
+    echo "[VENV_SCRIPT] Installing other requirements..."
+    \$PIP_EXEC_SUB install -r requirements.txt
+else
+    echo "[VENV_SCRIPT ERROR] requirements.txt not found!"
+    exit 1
+fi
+
+echo "[VENV_SCRIPT] Verifying TA-Lib Python import..."
+python -c "import talib; print(\"[VENV_SCRIPT SUCCESS] TA-Lib Python package imported successfully.\")" || \
+    (echo "[VENV_SCRIPT ERROR] TA-Lib Python import FAILED! This is the final check." && exit 1)
+
+deactivate
+echo "[VENV_SCRIPT] Virtual environment setup complete."
+EOF_INNER_SCRIPT
+)
+
+    # Create a temporary script file
+    TMP_SCRIPT_PATH="/tmp/venv_setup_temp.sh"
+    echo "$VENV_SETUP_SCRIPT_CONTENT" | sudo tee "$TMP_SCRIPT_PATH" > /dev/null
+    sudo chmod +x "$TMP_SCRIPT_PATH"
+    sudo chown "$BOT_USER":"$BOT_USER" "$TMP_SCRIPT_PATH" # Ensure bot user can execute if needed, though sudo -u will run it
+
+    # Execute the temporary script as the bot_user
+    if ! sudo -u "$BOT_USER" bash "$TMP_SCRIPT_PATH" "$INSTALL_DIR" "$VENV_NAME" "$PYTHON_EXECUTABLE" "$PIP_EXECUTABLE"; then
+        log_fatal "Virtual environment setup or dependency installation failed using temporary script. Check output above."
     fi
+    sudo rm -f "$TMP_SCRIPT_PATH" # Clean up the temporary script
+    # --- END OF MODIFIED SECTION ---
+
     log_success "Python virtual environment and dependencies set up."
 
-    # ... (rest of perform_installation: directory structure, .env, systemd) ...
-    # ... (management functions, main_menu, script execution logic) ...
+    # ... (Rest of perform_installation: directory structure, .env, systemd) ...
+    log_info "5. Ensuring project directory structure..."
+    sudo -u "$BOT_USER" bash -c "cd '$INSTALL_DIR' && mkdir -p flow_ai_core && touch flow_ai_core/__init__.py && mkdir -p data/historical_ohlcv && mkdir -p data/logs"
+    log_success "Directory structure ensured."
+
+    log_info "6. Configuration File (.env) Setup..."
+    ENV_FILE="$INSTALL_DIR/.env"; ENV_EXAMPLE_FILE="$INSTALL_DIR/.env.example"
+    if [ ! -f "$ENV_FILE" ]; then
+        if [ -f "$ENV_EXAMPLE_FILE" ]; then
+            sudo cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"; sudo chown "$BOT_USER":"$BOT_USER" "$ENV_FILE"; sudo chmod 600 "$ENV_FILE"
+            log_warning "Copied .env.example to .env. EDIT $ENV_FILE with your settings."
+        else log_warning ".env.example not found. Create $ENV_FILE manually."; fi
+    else log_info ".env file already exists at $ENV_FILE."; fi
+
+    log_info "7. Setting up systemd service '$SERVICE_NAME'..."
+    SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+    SYSTEMD_SERVICE_CONTENT="[Unit]
+Description=$PROJECT_NAME Service
+After=network.target
+[Service]
+Type=simple
+User=$BOT_USER
+Group=$BOT_USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/$VENV_NAME/bin/python main.py
+Restart=on-failure
+RestartSec=10s
+Environment=\"PYTHONUNBUFFERED=1\"
+StandardOutput=journal
+StandardError=journal
+[Install]
+WantedBy=multi-user.target"
+    echo "$SYSTEMD_SERVICE_CONTENT" | sudo tee "$SERVICE_FILE" > /dev/null
+    sudo chmod 644 "$SERVICE_FILE"; sudo systemctl daemon-reload; sudo systemctl enable "$SERVICE_NAME"
+    log_success "Systemd service '$SERVICE_NAME.service' created and enabled."
+
+    set +e 
+    log_info "--- Core Installation Finished ---"
+    read -p "Press [Enter] to return to the main menu..."
 }
 
-# --- Management Functions (manage_service, view_logs, etc. as before) ---
-# (Paste the management functions from the previous version of install_and_manage.sh here)
-# Make sure they use the global INSTALL_DIR and BOT_USER which are set in perform_installation
-# or detected in main_menu.
+# ... (Rest of the script: management functions, main_menu, execution logic as before) ...
+# Ensure perform_uninstall, manage_service, etc. are also defined.
+# I'll paste them again for completeness of this script block.
 
 manage_service() { 
     local ACTION=$1
@@ -199,64 +292,34 @@ train_ai_model_interactive() {
     local current_install_dir=${INSTALL_DIR:-$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$INSTALL_DIR_DEFAULT")}
     local current_bot_user=${BOT_USER:-$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$BOT_USER_DEFAULT")}
     log_info "Training AI as '$current_bot_user' in '$current_install_dir'..."
-    if ! sudo -u "$current_bot_user" bash -s -- "$current_install_dir" "$VENV_NAME" << 'EOF_TRAIN_CMD'
-        set -e; cd "$1"; source "$2/bin/activate"; python train_model.py; deactivate
-EOF_TRAIN_CMD
+    # Modified to use temporary script approach for consistency, though heredoc might work here too
+    TRAIN_SCRIPT_CONTENT=$(cat << EOF_TRAIN_INNER
+#!/bin/bash
+set -e
+cd "\$1"
+echo "[TRAIN_SCRIPT] Activating venv '\$2'..."
+source "\$2/bin/activate"
+echo "[TRAIN_SCRIPT] Starting train_model.py..."
+python train_model.py
+echo "[TRAIN_SCRIPT] train_model.py finished."
+deactivate
+EOF_TRAIN_INNER
+)
+    TMP_TRAIN_SCRIPT_PATH="/tmp/train_model_temp.sh"
+    echo "$TRAIN_SCRIPT_CONTENT" | sudo tee "$TMP_TRAIN_SCRIPT_PATH" > /dev/null
+    sudo chmod +x "$TMP_TRAIN_SCRIPT_PATH"
+    sudo chown "$current_bot_user":"$current_bot_user" "$TMP_TRAIN_SCRIPT_PATH"
+
+    if ! sudo -u "$current_bot_user" bash "$TMP_TRAIN_SCRIPT_PATH" "$current_install_dir" "$VENV_NAME";
     then log_error "AI Training FAILED."; else log_success "AI Training COMPLETED."; fi
+    sudo rm -f "$TMP_TRAIN_SCRIPT_PATH"
     read -p "Press [Enter]..."
 }
 
-# --- Main Menu (as before, with Uninstall option) ---
-main_menu() {
-    if [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
-        DETECTED_INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
-        DETECTED_BOT_USER=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
-        if [ -z "$INSTALL_DIR" ] && [ -n "$DETECTED_INSTALL_DIR" ]; then INSTALL_DIR="$DETECTED_INSTALL_DIR"; fi
-        if [ -z "$BOT_USER" ] && [ -n "$DETECTED_BOT_USER" ]; then BOT_USER="$DETECTED_BOT_USER"; fi
-    fi
-
-    while true; do
-        clear
-        echo "========================================================="
-        echo " FlowAI-ICT-Trading-Bot Management Panel"
-        echo " Project Dir: ${INSTALL_DIR:-Not Set/Run Install First}"
-        echo " Bot User   : ${BOT_USER:-Not Set/Run Install First}"
-        echo " Service    : $SERVICE_NAME"
-        echo "========================================================="
-        echo "  1. Perform Full Installation / Re-check Prerequisites"
-        echo "  2. Start Bot Service"; echo "  3. Stop Bot Service"
-        echo "  4. Restart Bot Service"; echo "  5. View Bot Service Status"
-        echo "  6. View Live Bot Logs";  echo "  7. Display System Status"
-        echo "  8. Edit .env File"; echo "  9. Train AI Model"
-        echo " 10. (Info) Update Project"; echo " 11. Full Uninstall"
-        echo "---------------------------------------------------------"
-        echo "  0. Exit"
-        echo "========================================================="
-        read -p "Enter your choice [0-11]: " choice
-
-        case $choice in
-            1) check_root; perform_installation ;;
-            2) check_root; manage_service "start" ;;
-            3) check_root; manage_service "stop" ;;
-            4) check_root; manage_service "restart" ;;
-            5) check_root; manage_service "status" ;;
-            6) check_root; view_logs ;;
-            7) display_status_snapshot ;;
-            8) check_root; edit_env_file ;;
-            9) check_root; train_ai_model_interactive ;;
-            10) log_info "To update: cd ${INSTALL_DIR:-/path/to/bot}; sudo -u ${BOT_USER:-flowaibot} git pull; sudo systemctl restart $SERVICE_NAME"; read -p "[Enter]..." ;;
-            11) check_root; perform_uninstall ;; # Make sure perform_uninstall is defined
-            0) echo "Exiting."; exit 0 ;;
-            *) log_warning "Invalid choice."; read -p "[Enter]..." ;;
-        esac
-    done
-}
-
-# --- Uninstall Function (ensure it's defined if called by menu) ---
 perform_uninstall() {
+    # (Uninstall logic as before)
     set -e 
     log_warning "--- Starting Full Uninstall Process ---"
-    # (Full uninstall logic as previously provided)
     local current_install_dir=${INSTALL_DIR}
     local current_bot_user=${BOT_USER}
     if [ -z "$current_install_dir" ] && [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then current_install_dir=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null); fi
@@ -281,35 +344,61 @@ perform_uninstall() {
 
     log_info "Deleting user '$current_bot_user'..."
     if id "$current_bot_user" &>/dev/null; then
-        sudo pkill -u "$current_bot_user" || true; sudo userdel -r "$current_bot_user" || log_warning "userdel failed (maybe groups/processes)."
+        sudo pkill -u "$current_bot_user" || true; sudo userdel -r "$current_bot_user" || log_warning "userdel failed."
         log_success "User '$current_bot_user' deleted."; else log_warning "User not found."; fi
     
-    INSTALL_DIR=""; BOT_USER="" # Reset globals
+    INSTALL_DIR=""; BOT_USER="" 
     set +e; log_success "--- Full Uninstall Complete ---"; read -p "Press [Enter]..."
 }
 
+main_menu() {
+    # (Main menu logic as before)
+    if [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
+        DETECTED_INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
+        DETECTED_BOT_USER=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
+        if [ -z "$INSTALL_DIR" ] && [ -n "$DETECTED_INSTALL_DIR" ]; then INSTALL_DIR="$DETECTED_INSTALL_DIR"; fi
+        if [ -z "$BOT_USER" ] && [ -n "$DETECTED_BOT_USER" ]; then BOT_USER="$DETECTED_BOT_USER"; fi
+    fi
+    while true; do clear
+        echo "========================================================="
+        echo " FlowAI-ICT-Trading-Bot Management Panel"
+        echo " Project Dir: ${INSTALL_DIR:-Not Set/Run Install First}"
+        echo " Bot User   : ${BOT_USER:-Not Set/Run Install First}"
+        echo " Service    : $SERVICE_NAME"; echo "========================================================="
+        echo "  1. Perform Full Installation / Re-check Prerequisites"
+        echo "  2. Start Bot Service"; echo "  3. Stop Bot Service"
+        echo "  4. Restart Bot Service"; echo "  5. View Bot Service Status"
+        echo "  6. View Live Bot Logs";  echo "  7. Display System Status"
+        echo "  8. Edit .env File"; echo "  9. Train AI Model"
+        echo " 10. (Info) Update Project"; echo " 11. Full Uninstall"
+        echo "---------------------------------------------------------"; echo "  0. Exit"
+        echo "========================================================="; read -p "Enter choice [0-11]: " choice
+        case $choice in
+            1) check_root; perform_installation ;; 2) check_root; manage_service "start" ;;
+            3) check_root; manage_service "stop" ;; 4) check_root; manage_service "restart" ;;
+            5) check_root; manage_service "status" ;; 6) check_root; view_logs ;;
+            7) display_status_snapshot ;; 8) check_root; edit_env_file ;;
+            9) check_root; train_ai_model_interactive ;;
+            10) log_info "To update: cd ${INSTALL_DIR:-/path/to/bot}; sudo -u ${BOT_USER:-$BOT_USER_DEFAULT} git pull; sudo systemctl restart $SERVICE_NAME"; read -p "[Enter]..." ;;
+            11) check_root; perform_uninstall ;; 0) echo "Exiting."; exit 0 ;;
+            *) log_warning "Invalid choice."; read -p "[Enter]..." ;;
+        esac
+    done
+}
 
 # --- Script Execution Logic ---
 SCRIPT_CWD=$(pwd)
-if [[ "$1" != "--help" && "$1" != "-h" ]]; then
-    check_root 
-fi
+if [[ "$1" != "--help" && "$1" != "-h" ]]; then check_root; fi
 
-# Ensure GITHUB_REPO_URL is set before calling perform_installation if it's not hardcoded
-if [[ "$1" == "--install-only" || "$1" == "" && ! -d "$INSTALL_DIR_DEFAULT/.git" ]]; then # Also if running first time via menu
+if [[ "$1" == "--install-only" || "$1" == "" && ! -f "/etc/systemd/system/$SERVICE_NAME.service" ]]; then
     if [ "$GITHUB_REPO_URL" == "YOUR_GITHUB_REPO_URL_HERE" ]; then
         read -p "Enter GitHub Repository URL (e.g., https://github.com/user/repo.git): " GITHUB_REPO_URL_INPUT
-        if [ -z "$GITHUB_REPO_URL_INPUT" ]; then log_fatal "GitHub URL cannot be empty for installation."; fi
+        if [ -z "$GITHUB_REPO_URL_INPUT" ]; then log_fatal "GitHub URL cannot be empty."; fi
         GITHUB_REPO_URL="$GITHUB_REPO_URL_INPUT"
     fi
+    if [ "$1" == "--install-only" ]; then perform_installation; exit 0; fi
 fi
 
-if [ "$1" == "--install-only" ]; then
-    perform_installation
-    exit 0
-elif [ "$1" == "--uninstall" ]; then 
-    perform_uninstall
-    exit 0
-fi
+if [ "$1" == "--uninstall" ]; then perform_uninstall; exit 0; fi
 
 main_menu
