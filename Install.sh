@@ -96,234 +96,106 @@ install_talib_c_library() {
     cd "$CURRENT_DIR"; rm -rf "$TEMP_DIR"; log_success "TA-Lib C library compiled and installed successfully."; return 0
 }
 
+# ... (script above this point, including install_talib_c_library as previously refined) ...
+
+# --- Core Installation Function ---
 perform_installation() {
-    # (Same as the fully corrected version from the previous step)
-    # This function now sets global INSTALL_DIR and BOT_USER upon successful completion of prompts.
-    set -e 
-    log_info "Starting Core Installation Process..."
-    prompt_with_default "Enter installation directory" "$INSTALL_DIR_DEFAULT" LOCAL_INSTALL_DIR
-    prompt_with_default "Enter dedicated username for the bot" "$BOT_USER_DEFAULT" LOCAL_BOT_USER
-    
-    # Set global vars after successful prompt for menu use
-    INSTALL_DIR="$LOCAL_INSTALL_DIR"
-    BOT_USER="$LOCAL_BOT_USER"
-    PROJECT_ROOT="$INSTALL_DIR" 
-
-    log_info "1. Installing System Prerequisites..." # ... (rest of prerequisite logic)
-    install_package_if_missing "git" "git" "Git" || log_fatal "Git failed."
-    install_package_if_missing "$PYTHON_EXECUTABLE" "python3" "Python 3" || log_fatal "Python 3 failed."
-    if ! $PYTHON_EXECUTABLE -m pip --version &> /dev/null; then
-        install_package_if_missing "pip3" "python3-pip" "Pip for Python 3" || log_fatal "Pip3 failed."
-    fi
-    PIP_EXECUTABLE="${PYTHON_EXECUTABLE} -m pip"
-    if ! $PYTHON_EXECUTABLE -m venv -h &> /dev/null; then
-         install_package_if_missing "python3-venv" "python3-venv" || \
-         install_package_if_missing "python-virtualenv" "python-virtualenv" || \
-         log_fatal "Python3 venv module failed."
-    fi
-    BUILD_TOOLS_APT="build-essential libffi-dev python3-dev wget tar automake autoconf pkg-config"
-    BUILD_TOOLS_YUM="gcc make gcc-c++ autoconf automake libtool libffi-devel python3-devel openssl-devel wget tar pkgconfig"
-    if command -v apt-get &> /dev/null; then
-        sudo apt-get install -y -qq $BUILD_TOOLS_APT || log_fatal "Build tools (apt) failed."
-    elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
-        sudo yum install -y $BUILD_TOOLS_YUM > /dev/null 2>&1 || sudo dnf install -y $BUILD_TOOLS_YUM > /dev/null 2>&1 || log_warning "Some build/dev pkgs (yum/dnf) failed."
-    fi
-    log_success "System prerequisites checked/installed."
-
-    install_talib_c_library || log_fatal "TA-Lib C library installation FAILED. Cannot proceed."
-
-    log_info "2. Creating dedicated user '$BOT_USER'..."
-    if id "$BOT_USER" &>/dev/null; then log_info "User '$BOT_USER' exists."; else
-        sudo useradd -r -m -d "/home/$BOT_USER" -s /bin/bash "$BOT_USER" || log_fatal "User create failed."
-        log_success "User '$BOT_USER' created."; fi
-
-    log_info "3. Setting up project directory at $INSTALL_DIR..."
-    if [ -d "$INSTALL_DIR/.git" ]; then
-        log_warning "Project dir $INSTALL_DIR exists. Pulling..."
-        (cd "$INSTALL_DIR" && sudo -u "$BOT_USER" git pull) || log_warning "git pull failed."
-    elif [ -d "$INSTALL_DIR" ]; then
-        log_warning "Dir $INSTALL_DIR exists (not git). Using it."
-    else
-        sudo git clone "$GITHUB_REPO_URL" "$INSTALL_DIR" || log_fatal "Clone $GITHUB_REPO_URL failed."
-    fi
-    sudo chown -R "$BOT_USER":"$BOT_USER" "$INSTALL_DIR"
-    sudo find "$INSTALL_DIR" -type d -exec chmod 750 {} \;
-    sudo find "$INSTALL_DIR" -type f -exec chmod 640 {} \;
-    sudo chmod u+x "$INSTALL_DIR"/*.sh "$INSTALL_DIR/main.py" "$INSTALL_DIR/train_model.py" || true
-    log_success "Project in $INSTALL_DIR. Permissions set."
+    # ... (initial parts of perform_installation as before) ...
+    # ... (prerequisites, user creation, git clone, C library install) ...
 
     log_info "4. Setting up Python virtual environment..."
+    # Using heredoc for bot user script
+    # Ensure requirements.txt has "TA-Lib" and NOT "talib-binary"
     if ! sudo -u "$BOT_USER" bash -s -- "$INSTALL_DIR" "$VENV_NAME" "$PYTHON_EXECUTABLE" "$PIP_EXECUTABLE" << 'EOF_BOT_VENV_SCRIPT'
         set -e 
         INSTALL_DIR_SUB="$1"; VENV_NAME_SUB="$2"; PYTHON_EXEC_SUB="$3"; PIP_EXEC_SUB="$4"
+        
+        echo "[VENV] Current directory: $(pwd)" # Should be /tmp or similar for sudo -s
+        # Ensure we are in the correct directory for the script
         cd "$INSTALL_DIR_SUB"
+        echo "[VENV] Changed to directory: $(pwd)"
+
         if [ ! -d "$VENV_NAME_SUB" ]; then
             echo "[VENV] Creating venv '$VENV_NAME_SUB'..."
             $PYTHON_EXEC_SUB -m venv "$VENV_NAME_SUB"
         fi
         echo "[VENV] Activating venv..."
         source "$VENV_NAME_SUB/bin/activate"
+        
         echo "[VENV] Upgrading Pip..."
         $PIP_EXEC_SUB install --upgrade pip
+        
         echo "[VENV] Installing dependencies from requirements.txt..."
         if [ -f "requirements.txt" ]; then
-            $PIP_EXEC_SUB install -r requirements.txt # Assumes TA-Lib C is installed, and TA-Lib (not talib-binary) is in reqs
-        else echo "[VENV ERROR] requirements.txt not found!"; exit 1; fi
+            # --- MODIFIED SECTION FOR TA-LIB INSTALL ---
+            echo "[VENV] Attempting to install TA-Lib Python wrapper with explicit LDFLAGS..."
+            # Since ldconfig found libta_lib.so in /lib, we point LDFLAGS there.
+            # If it was in /usr/lib, it would be -L/usr/lib. If /usr/local/lib, then -L/usr/local/lib.
+            # The TA-Lib C library headers are usually in /usr/include/ta-lib/ or /usr/local/include/ta-lib/
+            # CFLAGS might be needed if headers are not found: CFLAGS="-I/usr/include/ta-lib" 
+            # However, /usr/include is usually standard.
+            
+            # First, ensure numpy is installed as TA-Lib setup depends on it
+            echo "[VENV] Ensuring numpy is installed first..."
+            $PIP_EXEC_SUB install numpy --no-cache-dir
+
+            echo "[VENV] Installing TA-Lib with LDFLAGS=-L/lib ..."
+            LDFLAGS="-L/lib" $PIP_EXEC_SUB install TA-Lib --no-cache-dir --verbose
+            # If the above fails, and headers are suspected, you could try:
+            # CFLAGS="-I/usr/include/ta-lib" LDFLAGS="-L/lib" $PIP_EXEC_SUB install TA-Lib --no-cache-dir --verbose
+            
+            echo "[VENV] TA-Lib wrapper install attempt finished."
+            echo "[VENV] Installing other requirements..."
+            $PIP_EXEC_SUB install -r requirements.txt # This will re-check TA-Lib, but it should be satisfied
+            # --- END OF MODIFIED SECTION ---
+        else
+            echo "[VENV ERROR] requirements.txt not found!"
+            exit 1
+        fi
+        
         echo "[VENV] Verifying TA-Lib Python import..."
-        python -c "import talib; print(\"[VENV SUCCESS] TA-Lib Python package imported.\")" || \
-            (echo "[VENV ERROR] TA-Lib Python import FAILED!" && exit 1)
-        deactivate; echo "[VENV] Setup complete."
+        python -c "import talib; print(\"[VENV SUCCESS] TA-Lib Python package imported successfully.\")" || \
+            (echo "[VENV ERROR] TA-Lib Python import FAILED! This is the final check." && exit 1)
+        
+        deactivate
+        echo "[VENV] Virtual environment setup complete."
 EOF_BOT_VENV_SCRIPT
-    then log_fatal "Virtual environment or dependency installation failed."; fi
+    then
+        log_fatal "Virtual environment or dependency installation failed. Check output above."
+    fi
     log_success "Python virtual environment and dependencies set up."
 
-    log_info "5. Ensuring project directory structure..."
-    sudo -u "$BOT_USER" bash -c "cd '$INSTALL_DIR' && mkdir -p flow_ai_core && touch flow_ai_core/__init__.py && mkdir -p data/historical_ohlcv && mkdir -p data/logs"
-    log_success "Directory structure ensured."
-
-    log_info "6. Configuration File (.env) Setup..."
-    ENV_FILE="$INSTALL_DIR/.env"; ENV_EXAMPLE_FILE="$INSTALL_DIR/.env.example"
-    if [ ! -f "$ENV_FILE" ]; then
-        if [ -f "$ENV_EXAMPLE_FILE" ]; then
-            sudo cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"; sudo chown "$BOT_USER":"$BOT_USER" "$ENV_FILE"; sudo chmod 600 "$ENV_FILE"
-            log_warning "Copied .env.example to .env. EDIT $ENV_FILE with your settings."
-        else log_warning ".env.example not found. Create $ENV_FILE manually."; fi
-    else log_info ".env file already exists at $ENV_FILE."; fi
-
-    log_info "7. Setting up systemd service '$SERVICE_NAME'..."
-    SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-    # (Systemd service content as before)
-    SYSTEMD_SERVICE_CONTENT="[Unit]
-Description=$PROJECT_NAME Service
-After=network.target
-[Service]
-Type=simple
-User=$BOT_USER
-Group=$BOT_USER
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/$VENV_NAME/bin/python main.py
-Restart=on-failure
-RestartSec=10s
-Environment=\"PYTHONUNBUFFERED=1\"
-StandardOutput=journal
-StandardError=journal
-[Install]
-WantedBy=multi-user.target"
-    echo "$SYSTEMD_SERVICE_CONTENT" | sudo tee "$SERVICE_FILE" > /dev/null
-    sudo chmod 644 "$SERVICE_FILE"; sudo systemctl daemon-reload; sudo systemctl enable "$SERVICE_NAME"
-    log_success "Systemd service '$SERVICE_NAME.service' created and enabled."
-
-    set +e 
-    log_info "--- Core Installation Finished ---"
-    read -p "Press [Enter] to return to the main menu..."
+    # ... (rest of perform_installation: directory structure, .env, systemd) ...
+    # ... (management functions, main_menu, script execution logic) ...
 }
-
-# --- New Uninstall Function ---
-perform_uninstall() {
-    set -e # Enable error checking for this critical operation
-    log_warning "--- Starting Full Uninstall Process ---"
-    log_warning "This will REMOVE the bot, its user, service, and installation directory."
-
-    # Try to get current settings if not already set (for safety)
-    local current_install_dir=${INSTALL_DIR}
-    local current_bot_user=${BOT_USER}
-
-    if [ -z "$current_install_dir" ] && [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
-        current_install_dir=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
-    fi
-    if [ -z "$current_bot_user" ] && [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
-        current_bot_user=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
-    fi
-    
-    # If still not found, ask user
-    if [ -z "$current_install_dir" ]; then
-        prompt_with_default "Enter installation directory to remove" "$INSTALL_DIR_DEFAULT" current_install_dir
-    fi
-    if [ -z "$current_bot_user" ]; then
-        prompt_with_default "Enter bot username to remove" "$BOT_USER_DEFAULT" current_bot_user
-    fi
-
-    if [ -z "$current_install_dir" ] || [ -z "$current_bot_user" ]; then
-        log_error "Installation directory or bot user could not be determined. Aborting uninstall."
-        return 1
-    fi
-
-    log_warning "Uninstalling for User: '$current_bot_user', Directory: '$current_install_dir', Service: '$SERVICE_NAME'"
-    read -p "ARE YOU ABSOLUTELY SURE you want to proceed? This cannot be undone. (yes/NO): " CONFIRM_UNINSTALL
-    if [[ "$CONFIRM_UNINSTALL" != "yes" ]]; then
-        log_info "Uninstall aborted by user."
-        return
-    fi
-
-    # 1. Stop and disable systemd service
-    log_info "1. Stopping and disabling systemd service '$SERVICE_NAME'..."
-    if systemctl list-unit-files | grep -q "$SERVICE_NAME.service"; then # Check if service exists
-        sudo systemctl stop "$SERVICE_NAME" || log_warning "Failed to stop service (maybe not running)."
-        sudo systemctl disable "$SERVICE_NAME" || log_warning "Failed to disable service."
-        sudo rm -f "/etc/systemd/system/$SERVICE_NAME.service"
-        sudo rm -f "/etc/systemd/system/multi-user.target.wants/$SERVICE_NAME.service" # Clean symlinks
-        sudo systemctl daemon-reload
-        sudo systemctl reset-failed # Clear failed state if any
-        log_success "Systemd service '$SERVICE_NAME' removed."
-    else
-        log_warning "Systemd service '$SERVICE_NAME.service' not found. Skipping."
-    fi
-
-    # 2. Delete the project directory
-    log_info "2. Deleting project directory '$current_install_dir'..."
-    if [ -d "$current_install_dir" ]; then
-        sudo rm -rf "$current_install_dir"
-        log_success "Project directory '$current_install_dir' deleted."
-    else
-        log_warning "Project directory '$current_install_dir' not found. Skipping."
-    fi
-
-    # 3. Delete the dedicated bot user and its home directory
-    log_info "3. Deleting user '$current_bot_user' and its home directory..."
-    if id "$current_bot_user" &>/dev/null; then
-        # Kill any remaining processes by the user
-        sudo pkill -u "$current_bot_user" || true 
-        sudo userdel -r "$current_bot_user" || log_warning "Failed to delete user '$current_bot_user' (maybe processes still active or group issues)."
-        # The -r flag should remove the home directory. If not, an explicit rm -rf /home/$current_bot_user might be needed, but userdel -r is safer.
-        log_success "User '$current_bot_user' deleted."
-    else
-        log_warning "User '$current_bot_user' not found. Skipping."
-    fi
-    
-    # Reset global vars as settings are now gone
-    INSTALL_DIR=""
-    BOT_USER=""
-
-    set +e
-    log_success "--- Full Uninstall Process Complete ---"
-    read -p "Press [Enter] to return to the main menu..."
-}
-
 
 # --- Management Functions (manage_service, view_logs, etc. as before) ---
-# (Ensure they use the global INSTALL_DIR and BOT_USER, or re-detect them)
-manage_service() { # ... (same as before) ... 
+# (Paste the management functions from the previous version of install_and_manage.sh here)
+# Make sure they use the global INSTALL_DIR and BOT_USER which are set in perform_installation
+# or detected in main_menu.
+
+manage_service() { 
     local ACTION=$1
     if [ -z "$INSTALL_DIR" ]; then INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$INSTALL_DIR_DEFAULT"); fi
     sudo systemctl $ACTION $SERVICE_NAME; log_info "Service action '$ACTION'. Status:"; sudo systemctl status $SERVICE_NAME --no-pager -n 10; read -p "Press [Enter]..."
 }
-view_logs() { # ... (same as before) ... 
+view_logs() { 
     sudo journalctl -u $SERVICE_NAME -f -n 100; read -p "Press [Enter]..."
 }
-display_status_snapshot() { # ... (same as before, but ensure local vars for dir/user) ... 
+display_status_snapshot() { 
     local current_install_dir=${INSTALL_DIR:-$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "N/A")}
     local current_bot_user=${BOT_USER:-$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "N/A")}
-    print_divider; log_info "System Resource Snapshot:"; # ... (rest of display logic) ...
-    echo "CPU: $(uptime | awk -F'average: ' '{ print $2 }' | cut -d, -f1), RAM: $(free -h | awk '/^Mem:/ {print $3 "/" $2}), Disk: $(df -h / | awk 'NR==2 {print $3 "/" $2 " (" $5 ")"})"
+    print_divider; log_info "System Resource Snapshot:"; 
+    echo "CPU Load (1m): $(uptime | awk -F'average: ' '{ print $2 }' | cut -d, -f1), RAM: $(free -h | awk '/^Mem:/ {print $3 "/" $2}), Disk: $(df -h / | awk 'NR==2 {print $3 "/" $2 " (" $5 ")"})"
     log_info "Service '$SERVICE_NAME' (User: $current_bot_user, Dir: $current_install_dir):"; sudo systemctl status $SERVICE_NAME --no-pager -n 5 || log_warning "No status."
     if pgrep -u "$current_bot_user" -f "$current_install_dir/$VENV_NAME/bin/python main.py" > /dev/null; then log_success "Bot process RUNNING."; else log_warning "Bot process NOT RUNNING."; fi
     print_divider; read -p "Press [Enter]..."
 }
-edit_env_file() { # ... (same as before) ... 
+edit_env_file() { 
     local current_install_dir=${INSTALL_DIR:-$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$INSTALL_DIR_DEFAULT")}
     sudo nano "$current_install_dir/.env"; log_info ".env edit closed."; read -p "Press [Enter]..."
 }
-train_ai_model_interactive() { # ... (same as before) ...
+train_ai_model_interactive() { 
     local current_install_dir=${INSTALL_DIR:-$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$INSTALL_DIR_DEFAULT")}
     local current_bot_user=${BOT_USER:-$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$BOT_USER_DEFAULT")}
     log_info "Training AI as '$current_bot_user' in '$current_install_dir'..."
@@ -334,9 +206,8 @@ EOF_TRAIN_CMD
     read -p "Press [Enter]..."
 }
 
-# --- Main Menu (add Uninstall option) ---
+# --- Main Menu (as before, with Uninstall option) ---
 main_menu() {
-    # (Auto-detection logic for INSTALL_DIR and BOT_USER as before)
     if [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
         DETECTED_INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
         DETECTED_BOT_USER=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
@@ -344,30 +215,20 @@ main_menu() {
         if [ -z "$BOT_USER" ] && [ -n "$DETECTED_BOT_USER" ]; then BOT_USER="$DETECTED_BOT_USER"; fi
     fi
 
-
     while true; do
         clear
-        # (Menu header as before)
         echo "========================================================="
         echo " FlowAI-ICT-Trading-Bot Management Panel"
         echo " Project Dir: ${INSTALL_DIR:-Not Set/Run Install First}"
         echo " Bot User   : ${BOT_USER:-Not Set/Run Install First}"
         echo " Service    : $SERVICE_NAME"
         echo "========================================================="
-        echo " --- Installation & Setup ---"
         echo "  1. Perform Full Installation / Re-check Prerequisites"
-        echo " --- Service Management (systemd) ---"
         echo "  2. Start Bot Service"; echo "  3. Stop Bot Service"
         echo "  4. Restart Bot Service"; echo "  5. View Bot Service Status"
-        echo " --- Monitoring & Logs ---"
-        echo "  6. View Live Bot Logs (journalctl)"
-        echo "  7. Display System & Service Status Snapshot"
-        echo " --- Configuration & Model ---"
-        echo "  8. Edit .env Configuration File"
-        echo "  9. Train AI Model"
-        echo " --- Maintenance ---"
-        echo " 10. (Info) Update Project from GitHub"
-        echo " 11. Full Uninstall (Remove Bot, User, Service, Files)"
+        echo "  6. View Live Bot Logs";  echo "  7. Display System Status"
+        echo "  8. Edit .env File"; echo "  9. Train AI Model"
+        echo " 10. (Info) Update Project"; echo " 11. Full Uninstall"
         echo "---------------------------------------------------------"
         echo "  0. Exit"
         echo "========================================================="
@@ -380,32 +241,73 @@ main_menu() {
             4) check_root; manage_service "restart" ;;
             5) check_root; manage_service "status" ;;
             6) check_root; view_logs ;;
-            7) display_status_snapshot ;; # No root needed if commands are sudo'd inside
+            7) display_status_snapshot ;;
             8) check_root; edit_env_file ;;
             9) check_root; train_ai_model_interactive ;;
-            10) log_info "To update: cd ${INSTALL_DIR:-/path/to/bot}; sudo -u ${BOT_USER:-flowaibot} git pull; sudo systemctl restart $SERVICE_NAME"; read -p "Press [Enter]..." ;;
-            11) check_root; perform_uninstall ;; # New Uninstall Option
-            0) echo "Exiting management panel."; exit 0 ;;
-            *) log_warning "Invalid choice."; read -p "Press [Enter]..." ;;
+            10) log_info "To update: cd ${INSTALL_DIR:-/path/to/bot}; sudo -u ${BOT_USER:-flowaibot} git pull; sudo systemctl restart $SERVICE_NAME"; read -p "[Enter]..." ;;
+            11) check_root; perform_uninstall ;; # Make sure perform_uninstall is defined
+            0) echo "Exiting."; exit 0 ;;
+            *) log_warning "Invalid choice."; read -p "[Enter]..." ;;
         esac
     done
 }
 
-# --- Script Execution Logic (as before) ---
+# --- Uninstall Function (ensure it's defined if called by menu) ---
+perform_uninstall() {
+    set -e 
+    log_warning "--- Starting Full Uninstall Process ---"
+    # (Full uninstall logic as previously provided)
+    local current_install_dir=${INSTALL_DIR}
+    local current_bot_user=${BOT_USER}
+    if [ -z "$current_install_dir" ] && [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then current_install_dir=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null); fi
+    if [ -z "$current_bot_user" ] && [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then current_bot_user=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null); fi
+    if [ -z "$current_install_dir" ]; then prompt_with_default "Install directory to remove" "$INSTALL_DIR_DEFAULT" current_install_dir; fi
+    if [ -z "$current_bot_user" ]; then prompt_with_default "Bot username to remove" "$BOT_USER_DEFAULT" current_bot_user; fi
+    if [ -z "$current_install_dir" ] || [ -z "$current_bot_user" ]; then log_error "Cannot determine dir/user. Aborting uninstall."; return 1; fi
+
+    log_warning "Uninstalling User: '$current_bot_user', Dir: '$current_install_dir', Service: '$SERVICE_NAME'"
+    read -p "ARE YOU SURE? This is irreversible. (yes/NO): " CONFIRM_UNINSTALL
+    if [[ "$CONFIRM_UNINSTALL" != "yes" ]]; then log_info "Uninstall aborted."; return; fi
+
+    log_info "Stopping/disabling service '$SERVICE_NAME'..."
+    if systemctl list-unit-files | grep -q "$SERVICE_NAME.service"; then
+        sudo systemctl stop "$SERVICE_NAME" || true; sudo systemctl disable "$SERVICE_NAME" || true
+        sudo rm -f "/etc/systemd/system/$SERVICE_NAME.service"; sudo rm -f "/etc/systemd/system/multi-user.target.wants/$SERVICE_NAME.service"
+        sudo systemctl daemon-reload; sudo systemctl reset-failed; log_success "Service removed."
+    else log_warning "Service '$SERVICE_NAME.service' not found."; fi
+
+    log_info "Deleting project dir '$current_install_dir'..."
+    if [ -d "$current_install_dir" ]; then sudo rm -rf "$current_install_dir"; log_success "Project dir deleted."; else log_warning "Project dir not found."; fi
+
+    log_info "Deleting user '$current_bot_user'..."
+    if id "$current_bot_user" &>/dev/null; then
+        sudo pkill -u "$current_bot_user" || true; sudo userdel -r "$current_bot_user" || log_warning "userdel failed (maybe groups/processes)."
+        log_success "User '$current_bot_user' deleted."; else log_warning "User not found."; fi
+    
+    INSTALL_DIR=""; BOT_USER="" # Reset globals
+    set +e; log_success "--- Full Uninstall Complete ---"; read -p "Press [Enter]..."
+}
+
+
+# --- Script Execution Logic ---
 SCRIPT_CWD=$(pwd)
 if [[ "$1" != "--help" && "$1" != "-h" ]]; then
     check_root 
 fi
 
-if [ "$1" == "--install-only" ]; then
+# Ensure GITHUB_REPO_URL is set before calling perform_installation if it's not hardcoded
+if [[ "$1" == "--install-only" || "$1" == "" && ! -d "$INSTALL_DIR_DEFAULT/.git" ]]; then # Also if running first time via menu
     if [ "$GITHUB_REPO_URL" == "YOUR_GITHUB_REPO_URL_HERE" ]; then
-        read -p "Enter GitHub Repository URL: " GITHUB_REPO_URL_INPUT
-        if [ -z "$GITHUB_REPO_URL_INPUT" ]; then log_fatal "GitHub URL cannot be empty."; fi
+        read -p "Enter GitHub Repository URL (e.g., https://github.com/user/repo.git): " GITHUB_REPO_URL_INPUT
+        if [ -z "$GITHUB_REPO_URL_INPUT" ]; then log_fatal "GitHub URL cannot be empty for installation."; fi
         GITHUB_REPO_URL="$GITHUB_REPO_URL_INPUT"
     fi
+fi
+
+if [ "$1" == "--install-only" ]; then
     perform_installation
     exit 0
-elif [ "$1" == "--uninstall" ]; then # New command line flag for direct uninstall
+elif [ "$1" == "--uninstall" ]; then 
     perform_uninstall
     exit 0
 fi
