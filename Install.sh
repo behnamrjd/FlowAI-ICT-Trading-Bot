@@ -102,6 +102,7 @@ install_talib_c_library() {
 # ... (script above this point, including install_talib_c_library) ...
 
 # --- Core Installation Function ---
+# --- Core Installation Function ---
 perform_installation() {
     set -e 
     log_info "Starting Core Installation Process..."
@@ -113,6 +114,7 @@ perform_installation() {
     PROJECT_ROOT="$INSTALL_DIR" 
 
     # ... (Prerequisites, TA-Lib C install, User creation, Git clone - same as before) ...
+    # (Ensure these steps are correct and complete from previous versions)
     log_info "1. Installing System Prerequisites..."
     install_package_if_missing "git" "git" "Git" || log_fatal "Git failed."
     install_package_if_missing "$PYTHON_EXECUTABLE" "python3" "Python 3" || log_fatal "Python 3 failed."
@@ -156,50 +158,59 @@ perform_installation() {
     sudo chmod u+x "$INSTALL_DIR"/*.sh "$INSTALL_DIR/main.py" "$INSTALL_DIR/train_model.py" || true
     log_success "Project in $INSTALL_DIR. Permissions set."
 
-
     log_info "4. Setting up Python virtual environment..."
     
     # --- MODIFIED SECTION: Create a temporary script to run as bot_user ---
+    # Content of the script to be run by the bot_user
+    # Note the use of $1, $2, $3, $4 for positional parameters passed to this inner script
     VENV_SETUP_SCRIPT_CONTENT=$(cat << EOF_INNER_SCRIPT
 #!/bin/bash
 set -e 
-INSTALL_DIR_SUB="$1"
-VENV_NAME_SUB="$2"
-PYTHON_EXEC_SUB="$3"
-PIP_EXEC_SUB="$4"
+# Parameters passed from the main script:
+# \$1: INSTALL_DIR_SUB
+# \$2: VENV_NAME_SUB
+# \$3: PYTHON_EXEC_SUB
+# \$4: PIP_EXEC_SUB
 
-echo "[VENV_SCRIPT] Running as user: \$(whoami) in dir: \$(pwd)"
-cd "\$INSTALL_DIR_SUB"
+# For debugging, print received arguments and current user/directory
+echo "[VENV_SCRIPT] Running as user: \$(whoami)"
+echo "[VENV_SCRIPT] Initial working directory: \$(pwd)"
+echo "[VENV_SCRIPT] Received INSTALL_DIR_SUB: \$1"
+echo "[VENV_SCRIPT] Received VENV_NAME_SUB: \$2"
+echo "[VENV_SCRIPT] Received PYTHON_EXEC_SUB: \$3"
+echo "[VENV_SCRIPT] Received PIP_EXEC_SUB: \$4"
+
+cd "\$1" # Use the first argument passed to the script for INSTALL_DIR
 echo "[VENV_SCRIPT] Changed to directory: \$(pwd)"
 
-if [ ! -d "\$VENV_NAME_SUB" ]; then
-    echo "[VENV_SCRIPT] Creating venv '\$VENV_NAME_SUB'..."
-    \$PYTHON_EXEC_SUB -m venv "\$VENV_NAME_SUB"
+if [ ! -d "\$2" ]; then # Use the second argument for VENV_NAME
+    echo "[VENV_SCRIPT] Creating venv '\$2'..."
+    \$3 -m venv "\$2" # Use third arg for PYTHON_EXEC
 fi
 echo "[VENV_SCRIPT] Activating venv..."
-source "\$VENV_NAME_SUB/bin/activate"
+source "\$2/bin/activate"
 
 echo "[VENV_SCRIPT] Upgrading Pip..."
-\$PIP_EXEC_SUB install --upgrade pip
+\$4 install --upgrade pip # Use fourth arg for PIP_EXEC
 
 echo "[VENV_SCRIPT] Installing dependencies from requirements.txt..."
 if [ -f "requirements.txt" ]; then
     echo "[VENV_SCRIPT] Ensuring numpy is installed first..."
-    \$PIP_EXEC_SUB install numpy --no-cache-dir
+    \$4 install numpy --no-cache-dir
 
     echo "[VENV_SCRIPT] Installing TA-Lib with LDFLAGS=-L/lib ..."
-    LDFLAGS="-L/lib" \$PIP_EXEC_SUB install TA-Lib --no-cache-dir --verbose
+    LDFLAGS="-L/lib" \$4 install TA-Lib --no-cache-dir --verbose
     
     echo "[VENV_SCRIPT] TA-Lib wrapper install attempt finished."
     echo "[VENV_SCRIPT] Installing other requirements..."
-    \$PIP_EXEC_SUB install -r requirements.txt
+    \$4 install -r requirements.txt
 else
     echo "[VENV_SCRIPT ERROR] requirements.txt not found!"
     exit 1
 fi
 
 echo "[VENV_SCRIPT] Verifying TA-Lib Python import..."
-python -c "import talib; print(\"[VENV_SCRIPT SUCCESS] TA-Lib Python package imported successfully.\")" || \
+python -c "import talib; print(\\\"[VENV_SCRIPT SUCCESS] TA-Lib Python package imported successfully.\\\")" || \
     (echo "[VENV_SCRIPT ERROR] TA-Lib Python import FAILED! This is the final check." && exit 1)
 
 deactivate
@@ -207,22 +218,25 @@ echo "[VENV_SCRIPT] Virtual environment setup complete."
 EOF_INNER_SCRIPT
 )
 
-    # Create a temporary script file
-    TMP_SCRIPT_PATH="/tmp/venv_setup_temp.sh"
+    TMP_SCRIPT_PATH="/tmp/flowai_venv_setup.sh" # More unique name
     echo "$VENV_SETUP_SCRIPT_CONTENT" | sudo tee "$TMP_SCRIPT_PATH" > /dev/null
-    sudo chmod +x "$TMP_SCRIPT_PATH"
-    sudo chown "$BOT_USER":"$BOT_USER" "$TMP_SCRIPT_PATH" # Ensure bot user can execute if needed, though sudo -u will run it
+    sudo chmod 755 "$TMP_SCRIPT_PATH" # Make executable for user/group/other for simplicity with sudo -u
+    # No need to chown the script itself to bot_user, as root is creating it and sudo -u will execute it.
 
-    # Execute the temporary script as the bot_user
-    if ! sudo -u "$BOT_USER" bash "$TMP_SCRIPT_PATH" "$INSTALL_DIR" "$VENV_NAME" "$PYTHON_EXECUTABLE" "$PIP_EXECUTABLE"; then
+    # Execute the temporary script as the bot_user, passing necessary variables as arguments
+    # The `bash` command invoked by `sudo -u` will take the script path as its first real argument,
+    # and then $INSTALL_DIR, $VENV_NAME etc. become $1, $2 within that script.
+    log_info "Executing venv setup script as user '$BOT_USER' with args: $INSTALL_DIR $VENV_NAME $PYTHON_EXECUTABLE $PIP_EXECUTABLE"
+    if ! sudo -H -u "$BOT_USER" bash "$TMP_SCRIPT_PATH" "$INSTALL_DIR" "$VENV_NAME" "$PYTHON_EXECUTABLE" "$PIP_EXECUTABLE"; then
         log_fatal "Virtual environment setup or dependency installation failed using temporary script. Check output above."
     fi
-    sudo rm -f "$TMP_SCRIPT_PATH" # Clean up the temporary script
+    sudo rm -f "$TMP_SCRIPT_PATH" 
     # --- END OF MODIFIED SECTION ---
 
     log_success "Python virtual environment and dependencies set up."
 
     # ... (Rest of perform_installation: directory structure, .env, systemd) ...
+    # (Same as before)
     log_info "5. Ensuring project directory structure..."
     sudo -u "$BOT_USER" bash -c "cd '$INSTALL_DIR' && mkdir -p flow_ai_core && touch flow_ai_core/__init__.py && mkdir -p data/historical_ohlcv && mkdir -p data/logs"
     log_success "Directory structure ensured."
@@ -264,38 +278,21 @@ WantedBy=multi-user.target"
 }
 
 # ... (Rest of the script: management functions, main_menu, execution logic as before) ...
-# Ensure perform_uninstall, manage_service, etc. are also defined.
-# I'll paste them again for completeness of this script block.
+# (Make sure perform_uninstall, manage_service, view_logs, display_status_snapshot, 
+#  edit_env_file, train_ai_model_interactive are defined as in the previous complete script version)
+# I'll re-paste train_ai_model_interactive with the same temp script fix for consistency
 
-manage_service() { 
-    local ACTION=$1
-    if [ -z "$INSTALL_DIR" ]; then INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$INSTALL_DIR_DEFAULT"); fi
-    sudo systemctl $ACTION $SERVICE_NAME; log_info "Service action '$ACTION'. Status:"; sudo systemctl status $SERVICE_NAME --no-pager -n 10; read -p "Press [Enter]..."
-}
-view_logs() { 
-    sudo journalctl -u $SERVICE_NAME -f -n 100; read -p "Press [Enter]..."
-}
-display_status_snapshot() { 
-    local current_install_dir=${INSTALL_DIR:-$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "N/A")}
-    local current_bot_user=${BOT_USER:-$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "N/A")}
-    print_divider; log_info "System Resource Snapshot:"; 
-    echo "CPU Load (1m): $(uptime | awk -F'average: ' '{ print $2 }' | cut -d, -f1), RAM: $(free -h | awk '/^Mem:/ {print $3 "/" $2}), Disk: $(df -h / | awk 'NR==2 {print $3 "/" $2 " (" $5 ")"})"
-    log_info "Service '$SERVICE_NAME' (User: $current_bot_user, Dir: $current_install_dir):"; sudo systemctl status $SERVICE_NAME --no-pager -n 5 || log_warning "No status."
-    if pgrep -u "$current_bot_user" -f "$current_install_dir/$VENV_NAME/bin/python main.py" > /dev/null; then log_success "Bot process RUNNING."; else log_warning "Bot process NOT RUNNING."; fi
-    print_divider; read -p "Press [Enter]..."
-}
-edit_env_file() { 
-    local current_install_dir=${INSTALL_DIR:-$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$INSTALL_DIR_DEFAULT")}
-    sudo nano "$current_install_dir/.env"; log_info ".env edit closed."; read -p "Press [Enter]..."
-}
 train_ai_model_interactive() { 
     local current_install_dir=${INSTALL_DIR:-$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$INSTALL_DIR_DEFAULT")}
     local current_bot_user=${BOT_USER:-$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null || echo "$BOT_USER_DEFAULT")}
-    log_info "Training AI as '$current_bot_user' in '$current_install_dir'..."
-    # Modified to use temporary script approach for consistency, though heredoc might work here too
-    TRAIN_SCRIPT_CONTENT=$(cat << EOF_TRAIN_INNER
+    
+    log_info "Attempting AI model training as '$current_bot_user' in '$current_install_dir'..."
+
+    TRAIN_SCRIPT_INNER_CONTENT=$(cat << EOF_TRAIN_INNER
 #!/bin/bash
 set -e
+# \$1: INSTALL_DIR_TRAIN, \$2: VENV_NAME_TRAIN
+echo "[TRAIN_SCRIPT] Running as user: \$(whoami) in dir: \$(pwd)"
 cd "\$1"
 echo "[TRAIN_SCRIPT] Activating venv '\$2'..."
 source "\$2/bin/activate"
@@ -305,12 +302,11 @@ echo "[TRAIN_SCRIPT] train_model.py finished."
 deactivate
 EOF_TRAIN_INNER
 )
-    TMP_TRAIN_SCRIPT_PATH="/tmp/train_model_temp.sh"
-    echo "$TRAIN_SCRIPT_CONTENT" | sudo tee "$TMP_TRAIN_SCRIPT_PATH" > /dev/null
-    sudo chmod +x "$TMP_TRAIN_SCRIPT_PATH"
-    sudo chown "$current_bot_user":"$current_bot_user" "$TMP_TRAIN_SCRIPT_PATH"
+    TMP_TRAIN_SCRIPT_PATH="/tmp/flowai_train_model_temp.sh"
+    echo "$TRAIN_SCRIPT_INNER_CONTENT" | sudo tee "$TMP_TRAIN_SCRIPT_PATH" > /dev/null
+    sudo chmod 755 "$TMP_TRAIN_SCRIPT_PATH"
 
-    if ! sudo -u "$current_bot_user" bash "$TMP_TRAIN_SCRIPT_PATH" "$current_install_dir" "$VENV_NAME";
+    if ! sudo -H -u "$current_bot_user" bash "$TMP_TRAIN_SCRIPT_PATH" "$current_install_dir" "$VENV_NAME";
     then log_error "AI Training FAILED."; else log_success "AI Training COMPLETED."; fi
     sudo rm -f "$TMP_TRAIN_SCRIPT_PATH"
     read -p "Press [Enter]..."
