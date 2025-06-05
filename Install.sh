@@ -1,59 +1,46 @@
 #!/bin/bash
 
-# FlowAI-ICT-Trading-Bot Installation & Basic Management Script
-
-# Exit immediately if a command exits with a non-zero status during setup.
-# We'll handle errors differently in the menu.
-# set -e # Disabled for menu interactivity
+# FlowAI-ICT-Trading-Bot Enhanced Installation Script for Linux
 
 # --- Configuration Variables ---
 PROJECT_NAME="FlowAI-ICT-Trading-Bot"
-# IMPORTANT: Replace with your actual GitHub repository URL
-GITHUB_REPO_URL="YOUR_GITHUB_REPO_URL_HERE"
-# Default installation directory
+GITHUB_REPO_URL="YOUR_GITHUB_REPO_URL_HERE" # IMPORTANT: Replace
 INSTALL_DIR_DEFAULT="/opt/$PROJECT_NAME"
-# Dedicated user for the bot
 BOT_USER_DEFAULT="flowaibot"
 PYTHON_EXECUTABLE="python3"
 VENV_NAME=".venv"
-SERVICE_NAME="flowai-bot" # Name for the systemd service
+SERVICE_NAME="flowai-bot"
 
 # --- Global Variables (for script state) ---
 INSTALL_DIR=""
 BOT_USER=""
+PROJECT_ROOT=$(pwd) # Assuming script is run from project root or this will be updated
 
 # --- Helper Functions ---
-log_info() { echo "[INFO] $1"; }
-log_warning() { echo "[WARNING] $1"; }
-log_error() { echo "[ERROR] $1"; } # Does not exit in menu mode
-log_success() { echo "[SUCCESS] $1"; }
+log_info() { echo -e "\033[34m[INFO]\033[0m $1"; }
+log_warning() { echo -e "\033[33m[WARNING]\033[0m $1"; }
+log_error() { echo -e "\033[31m[ERROR]\033[0m $1"; } # For menu mode, does not exit
+log_fatal() { echo -e "\033[31m[FATAL]\033[0m $1"; exit 1; } # For setup phase
+log_success() { echo -e "\033[32m[SUCCESS]\033[0m $1"; }
 print_divider() { echo "---------------------------------------------------------"; }
 
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        echo "[FATAL] This script needs root or sudo privileges for initial setup and service management."
-        echo "Please run as: sudo $0"
-        exit 1
+        log_fatal "This script needs root or sudo privileges. Please run as: sudo $0"
     fi
 }
 
-# Function to prompt for user input with a default value
 prompt_with_default() {
-    local prompt_message=$1
-    local default_value=$2
-    local variable_name=$3
-    local user_input
+    local prompt_message=$1; local default_value=$2; local variable_name=$3; local user_input
     read -p "$prompt_message [$default_value]: " user_input
     eval "$variable_name=\"${user_input:-$default_value}\""
 }
 
 install_package_if_missing() {
-    local cmd_to_check=$1
-    local package_name=$2
-    local friendly_name=${3:-$package_name} # Optional friendly name for messages
-
-    if ! command -v $cmd_to_check &> /dev/null; then
-        log_warning "$friendly_name ($cmd_to_check) not found. Attempting to install..."
+    local cmd_to_check=$1; local package_name=$2; local friendly_name=${3:-$package_name}
+    # Check if command exists OR if package is already installed (for apt-based systems)
+    if ! command -v $cmd_to_check &> /dev/null && ! (dpkg-query -W -f='${Status}' $package_name 2>/dev/null | grep -q "ok installed"); then
+        log_warning "$friendly_name ($cmd_to_check or package $package_name) not found. Attempting to install $package_name..."
         if command -v apt-get &> /dev/null; then
             sudo apt-get update -qq && sudo apt-get install -y -qq $package_name || { log_error "Failed to install $friendly_name via apt-get."; return 1; }
         elif command -v yum &> /dev/null; then
@@ -61,13 +48,72 @@ install_package_if_missing() {
         elif command -v dnf &> /dev/null; then
             sudo dnf install -y $package_name || { log_error "Failed to install $friendly_name via dnf."; return 1; }
         else
-            log_error "Unsupported package manager. Please install $friendly_name manually."
-            return 1
+            log_error "Unsupported package manager. Please install $friendly_name manually."; return 1
         fi
         log_success "$friendly_name installed."
+    else
+        log_info "$friendly_name already installed or command functional."
     fi
     return 0
 }
+
+# --- TA-Lib C Library Installation Function ---
+install_talib_c_library() {
+    log_info "Attempting to install TA-Lib C library from source..."
+    TA_LIB_VERSION="0.4.0" # Fixed version for stability
+    TA_LIB_SRC_URL="http://prdownloads.sourceforge.net/ta-lib/ta-lib-${TA_LIB_VERSION}-src.tar.gz"
+    
+    if ldconfig -p | grep -q libta_lib; then
+        log_info "TA-Lib C library seems to be already installed (found in ldconfig cache)."
+        return 0
+    fi
+    # Fallback check: try to find ta-lib-config
+    if command -v ta-lib-config &> /dev/null; then
+        log_info "TA-Lib C library seems to be already installed (ta-lib-config found)."
+        return 0
+    fi
+
+
+    TEMP_DIR=$(mktemp -d)
+    CURRENT_DIR=$(pwd) # Save current directory
+    cd "$TEMP_DIR"
+
+    log_info "Downloading TA-Lib source from $TA_LIB_SRC_URL..."
+    wget -q -O "ta-lib-src.tar.gz" "$TA_LIB_SRC_URL" || { log_error "Failed to download TA-Lib source."; cd "$CURRENT_DIR"; rm -rf "$TEMP_DIR"; return 1; }
+    tar -xzf "ta-lib-src.tar.gz" || { log_error "Failed to extract TA-Lib source."; cd "$CURRENT_DIR"; rm -rf "$TEMP_DIR"; return 1; }
+    
+    cd "ta-lib" || { log_error "TA-Lib source directory not found after extraction."; cd "$CURRENT_DIR"; rm -rf "$TEMP_DIR"; return 1; }
+
+    log_info "Configuring TA-Lib (./configure --prefix=/usr)..."
+    # Run configure, capture output only on error
+    if ! ./configure --prefix=/usr > configure.log 2>&1; then
+        log_error "TA-Lib ./configure failed. Check $TEMP_DIR/ta-lib/configure.log for details."
+        cat configure.log # Show the log
+        cd "$CURRENT_DIR"; rm -rf "$TEMP_DIR"; return 1;
+    fi
+    
+    log_info "Building TA-Lib (make)..."
+    if ! make > make.log 2>&1; then
+        log_error "TA-Lib make failed. Check $TEMP_DIR/ta-lib/make.log for details."
+        cat make.log
+        cd "$CURRENT_DIR"; rm -rf "$TEMP_DIR"; return 1;
+    fi
+    
+    log_info "Installing TA-Lib (sudo make install)..."
+    if ! sudo make install > make_install.log 2>&1; then
+        log_error "TA-Lib sudo make install failed. Check $TEMP_DIR/ta-lib/make_install.log for details."
+        cat make_install.log
+        cd "$CURRENT_DIR"; rm -rf "$TEMP_DIR"; return 1;
+    fi
+    
+    sudo ldconfig # Update library cache IMMEDIATELY
+    
+    cd "$CURRENT_DIR" # Go back to original directory
+    rm -rf "$TEMP_DIR"
+    log_success "TA-Lib C library installed successfully from source."
+    return 0
+}
+
 
 # --- Core Installation Function ---
 perform_installation() {
@@ -76,85 +122,109 @@ perform_installation() {
 
     prompt_with_default "Enter installation directory" "$INSTALL_DIR_DEFAULT" INSTALL_DIR
     prompt_with_default "Enter dedicated username for the bot" "$BOT_USER_DEFAULT" BOT_USER
+    PROJECT_ROOT="$INSTALL_DIR" # Update project root if different from script location
 
-    # 1. System Prerequisites
     log_info "1. Installing System Prerequisites..."
-    install_package_if_missing "git" "git" "Git" || exit 1
-    install_package_if_missing "$PYTHON_EXECUTABLE" "python3" "Python 3" || exit 1
-    # On some systems pip3 is separate, on others it's python3-pip linked to python3 -m pip
+    install_package_if_missing "git" "git" "Git" || log_fatal "Git installation failed."
+    install_package_if_missing "$PYTHON_EXECUTABLE" "python3" "Python 3" || log_fatal "Python 3 installation failed."
     if ! $PYTHON_EXECUTABLE -m pip --version &> /dev/null; then
-        install_package_if_missing "pip3" "python3-pip" "Pip for Python 3" || exit 1
+        install_package_if_missing "pip3" "python3-pip" "Pip for Python 3" || log_fatal "Pip3 installation failed."
     fi
     PIP_EXECUTABLE="${PYTHON_EXECUTABLE} -m pip"
-    install_package_if_missing "venv_check" "python3-venv" "Python 3 Venv module" # venv_check is a dummy name
-    # Build tools
+    # Check for python3-venv by trying to use it, package name varies too much
+    if ! $PYTHON_EXECUTABLE -m venv -h &> /dev/null; then
+         install_package_if_missing "python3-venv-dummy" "python3-venv" "Python 3 Venv module (python3-venv)" || \
+         install_package_if_missing "python3-virtualenv-dummy" "python-virtualenv" "Python 3 Venv module (python-virtualenv)" || \
+         log_fatal "Python3 venv module installation failed."
+    fi
+
+    # Build tools & other TA-Lib dependencies
     if command -v apt-get &> /dev/null; then
-        sudo apt-get install -y -qq build-essential libffi-dev python3-dev || log_error "Failed to install build tools (apt)."
+        sudo apt-get install -y -qq build-essential libffi-dev python3-dev wget tar || log_fatal "Failed to install build tools (apt)."
     elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
-        sudo yum groupinstall -y "Development Tools" > /dev/null 2>&1 || sudo dnf groupinstall -y "Development Tools" > /dev/null 2>&1 || log_warning "Could not install Dev Tools group."
-        sudo yum install -y libffi-devel python3-devel openssl-devel > /dev/null 2>&1 || sudo dnf install -y libffi-devel python3-devel openssl-devel > /dev/null 2>&1 || log_warning "Could not install -devel packages."
+        PKGS_YUM="gcc make gcc-c++ autoconf automake libtool libffi-devel python3-devel openssl-devel wget tar"
+        sudo yum install -y $PKGS_YUM > /dev/null 2>&1 || sudo dnf install -y $PKGS_YUM > /dev/null 2>&1 || log_warning "Could not install some build/dev packages via yum/dnf."
     fi
     log_success "System prerequisites checked/installed."
 
-    # 2. Create Dedicated Bot User
-    log_info "2. Creating dedicated user '$BOT_USER'..."
-    if id "$BOT_USER" &>/dev/null; then
-        log_info "User '$BOT_USER' already exists."
-    else
-        sudo useradd -r -m -d "/home/$BOT_USER" -s /bin/bash "$BOT_USER" || log_error "Failed to create user $BOT_USER."
-        log_success "User '$BOT_USER' created with home /home/$BOT_USER."
-    fi
+    # Install TA-Lib C Library (Needed before pip install TA-Lib if talib-binary fails)
+    install_talib_c_library || log_fatal "TA-Lib C library installation failed. This is critical for TA-Lib Python package."
 
-    # 3. Download/Clone Project
+    log_info "2. Creating dedicated user '$BOT_USER'..."
+    if id "$BOT_USER" &>/dev/null; then log_info "User '$BOT_USER' already exists."; else
+        sudo useradd -r -m -d "/home/$BOT_USER" -s /bin/bash "$BOT_USER" || log_fatal "Failed to create user $BOT_USER."
+        log_success "User '$BOT_USER' created with home /home/$BOT_USER."; fi
+
     log_info "3. Setting up project directory at $INSTALL_DIR..."
-    if [ -d "$INSTALL_DIR/.git" ]; then # Check if it's a git repo
-        log_warning "Project directory $INSTALL_DIR seems to exist. Attempting to pull latest changes..."
-        cd "$INSTALL_DIR"
-        sudo -u "$BOT_USER" git pull || log_warning "git pull failed. Continuing with existing files."
-        cd ..
+    if [ -d "$INSTALL_DIR/.git" ]; then
+        log_warning "Project dir $INSTALL_DIR exists. Attempting git pull..."
+        cd "$INSTALL_DIR"; sudo -u "$BOT_USER" git pull || log_warning "git pull failed. Continuing."; cd "$OLDPWD"
     elif [ -d "$INSTALL_DIR" ]; then
-         log_warning "Directory $INSTALL_DIR exists but is not a git repo or clone failed previously. Consider backing up manually."
-         read -p "Proceed with setup in existing directory $INSTALL_DIR? (y/N): " -n 1 -r REPLY
-         echo
-         if [[ ! $REPLY =~ ^[Yy]$ ]]; then log_error "User aborted setup."; fi
+        log_warning "Dir $INSTALL_DIR exists but not a git repo. Using existing dir."
     else
-        sudo git clone "$GITHUB_REPO_URL" "$INSTALL_DIR" || log_error "Failed to clone repository from $GITHUB_REPO_URL."
+        sudo git clone "$GITHUB_REPO_URL" "$INSTALL_DIR" || log_fatal "Failed to clone repo from $GITHUB_REPO_URL."
     fi
     sudo chown -R "$BOT_USER":"$BOT_USER" "$INSTALL_DIR"
-    sudo find "$INSTALL_DIR" -type d -exec chmod 750 {} \; # Dirs: user rwx, group rx, other ---
-    sudo find "$INSTALL_DIR" -type f -exec chmod 640 {} \; # Files: user rw, group r, other ---
-    sudo chmod +x "$INSTALL_DIR"/*.sh || true # Make shell scripts executable by owner
+    sudo find "$INSTALL_DIR" -type d -exec chmod 750 {} \;
+    sudo find "$INSTALL_DIR" -type f -exec chmod 640 {} \;
+    # Make shell scripts in the root executable by the owner (root at this stage of install script)
+    # and by the bot_user after chown
+    sudo chmod u+x "$INSTALL_DIR"/*.sh || true
+    # The bot user will need execute permission on main.py and train_model.py
+    sudo -u "$BOT_USER" chmod u+x "$INSTALL_DIR/main.py" || true
+    sudo -u "$BOT_USER" chmod u+x "$INSTALL_DIR/train_model.py" || true
     log_success "Project in $INSTALL_DIR. Permissions set."
 
-    # 4. Setup Python Virtual Environment & Install Dependencies
     log_info "4. Setting up Python virtual environment..."
     # Run commands as the bot user
-    sudo -u "$BOT_USER" bash -c "
-        set -e;
-        cd '$INSTALL_DIR';
-        if [ ! -d '$VENV_NAME' ]; then
-            echo '[VENV] Creating virtual environment...';
-            $PYTHON_EXECUTABLE -m venv '$VENV_NAME';
-        fi;
-        echo '[VENV] Activating virtual environment...';
-        source '$VENV_NAME/bin/activate';
-        echo '[VENV] Upgrading Pip...';
-        $PIP_EXECUTABLE install --upgrade pip;
-        echo '[VENV] Installing dependencies from requirements.txt...';
-        if [ -f 'requirements.txt' ]; then
-            $PIP_EXECUTABLE install -r requirements.txt;
+    # Using a heredoc for multi-line commands as bot_user
+    if ! sudo -u "$BOT_USER" bash -s -- "$INSTALL_DIR" "$VENV_NAME" "$PYTHON_EXECUTABLE" "$PIP_EXECUTABLE" << 'EOF_BOT_SCRIPT'
+        set -e # Strict error checking within this sub-script
+        INSTALL_DIR_SUB="$1"
+        VENV_NAME_SUB="$2"
+        PYTHON_EXEC_SUB="$3"
+        PIP_EXEC_SUB="$4"
+
+        cd "$INSTALL_DIR_SUB"
+        if [ ! -d "$VENV_NAME_SUB" ]; then
+            echo "[VENV] Creating virtual environment '$VENV_NAME_SUB'..."
+            $PYTHON_EXEC_SUB -m venv "$VENV_NAME_SUB"
+        fi
+        echo "[VENV] Activating virtual environment..."
+        source "$VENV_NAME_SUB/bin/activate"
+        
+        echo "[VENV] Upgrading Pip..."
+        $PIP_EXEC_SUB install --upgrade pip
+        
+        echo "[VENV] Installing dependencies from requirements.txt..."
+        if [ -f "requirements.txt" ]; then
+            # Try installing TA-Lib (wrapper) first, then others.
+            # If talib-binary fails, the C library should allow TA-Lib to build.
+            echo "[VENV] Attempting to install TA-Lib Python wrapper..."
+            $PIP_EXEC_SUB install TA-Lib --no-cache-dir 
+            echo "[VENV] TA-Lib wrapper install attempt finished. Installing other requirements..."
+            # Install other requirements, potentially skipping talib-binary if TA-Lib already installed
+            # Or, keep talib-binary and if it fails, the previous TA-Lib should suffice.
+            # For simplicity, just run the full requirements. If TA-Lib is met, pip will skip it.
+            $PIP_EXEC_SUB install -r requirements.txt
         else
-            echo '[VENV ERROR] requirements.txt not found!';
-            exit 1; # This will be caught by the sudo -u bash -c wrapper
-        fi;
-        echo '[VENV] Verifying TA-Lib installation...';
-        python -c 'import talib; print(\"[VENV SUCCESS] TA-Lib imported successfully.\")' || echo '[VENV WARNING] TA-Lib import test failed. Manual TA-Lib setup might be needed if bot errors.';
-        deactivate;
-        echo '[VENV] Setup complete.';
-    " || log_error "Virtual environment setup or dependency installation failed."
+            echo "[VENV ERROR] requirements.txt not found!"
+            exit 1
+        fi
+        
+        echo "[VENV] Verifying TA-Lib Python import..."
+        python -c "import talib; print(\"[VENV SUCCESS] TA-Lib Python package imported successfully.\")" || \
+            echo "[VENV WARNING] TA-Lib Python import test FAILED. Bot may not function correctly."
+        
+        deactivate
+        echo "[VENV] Virtual environment setup complete."
+EOF_BOT_SCRIPT
+    then
+        log_fatal "Virtual environment setup or dependency installation failed. Check output above."
+    fi
     log_success "Python virtual environment and dependencies set up."
 
-    # 5. Standardized Project Directory Structure
+
     log_info "5. Ensuring project directory structure..."
     sudo -u "$BOT_USER" bash -c "
         cd '$INSTALL_DIR' && \
@@ -163,23 +233,20 @@ perform_installation() {
     "
     log_success "Directory structure ensured."
 
-    # 6. Configuration File Setup (.env)
     log_info "6. Configuration File (.env) Setup..."
+    # (Env file setup as before)
     ENV_FILE="$INSTALL_DIR/.env"
     ENV_EXAMPLE_FILE="$INSTALL_DIR/.env.example"
     if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_EXAMPLE_FILE" ]; then
         sudo cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
         sudo chown "$BOT_USER":"$BOT_USER" "$ENV_FILE"
         sudo chmod 600 "$ENV_FILE"
-        log_warning "Copied .env.example to .env. YOU MUST EDIT $ENV_FILE with your actual settings."
-    elif [ -f "$ENV_FILE" ]; then
-        log_info ".env file already exists. Please ensure it's correctly configured."
-    else
-        log_warning ".env.example not found. Please create $ENV_FILE manually."
-    fi
+        log_warning "Copied .env.example to .env. YOU MUST EDIT $ENV_FILE with your settings."
+    elif [ -f "$ENV_FILE" ]; log_info ".env file already exists."; else
+        log_warning ".env.example not found. Create $ENV_FILE manually."; fi
 
-    # 7. Systemd Service Setup
     log_info "7. Setting up systemd service '$SERVICE_NAME'..."
+    # (Systemd service setup as before)
     SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
     SYSTEMD_SERVICE_CONTENT="[Unit]
 Description=$PROJECT_NAME Service
@@ -194,13 +261,8 @@ ExecStart=$INSTALL_DIR/$VENV_NAME/bin/python main.py
 Restart=on-failure
 RestartSec=10s
 Environment=\"PYTHONUNBUFFERED=1\"
-# StandardOutput=journal # Default, good for 'journalctl -u service_name'
-# StandardError=journal
-
-# Resource Limits (Example - uncomment and adjust if needed)
-# CPUQuota=75%
-# MemoryMax=1G
-# TasksMax=200
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -210,117 +272,112 @@ WantedBy=multi-user.target
     sudo systemctl daemon-reload
     sudo systemctl enable "$SERVICE_NAME"
     log_success "Systemd service '$SERVICE_NAME.service' created and enabled."
-    log_info "To start it now: sudo systemctl start $SERVICE_NAME"
 
     set +e # Disable strict error checking for menu part
     log_info "--- Core Installation Finished ---"
-    read -p "Press [Enter] to return to the main menu..."
+    echo "Installation directory: $INSTALL_DIR" # Save for menu
+    echo "Bot user: $BOT_USER"                 # Save for menu
+    read -p "Press [Enter] to return to the main menu (or script will exit if run with --install-only)..."
 }
 
-# --- Management Functions ---
+# --- Management Functions (manage_service, view_logs, display_status_snapshot, edit_env_file, train_ai_model_interactive) ---
+# (These functions remain largely the same as in the previous script version)
+# Ensure they use the dynamically set or detected INSTALL_DIR and BOT_USER.
 manage_service() {
-    ACTION=$1
+    local ACTION=$1
+    if [ -z "$INSTALL_DIR" ]; then log_error "INSTALL_DIR not set. Run installation or set manually."; return; fi
     sudo systemctl $ACTION $SERVICE_NAME
     log_info "Service action '$ACTION' executed. Current status:"
-    sudo systemctl status $SERVICE_NAME --no-pager -n 20 # Show recent logs
+    sudo systemctl status $SERVICE_NAME --no-pager -n 20
     read -p "Press [Enter] to continue..."
 }
 
 view_logs() {
+    if [ -z "$INSTALL_DIR" ]; then log_error "INSTALL_DIR not set. Run installation or set manually."; return; fi
     log_info "Displaying live logs for $SERVICE_NAME (Press Ctrl+C to stop)..."
-    sudo journalctl -u $SERVICE_NAME -f -n 100 # Show last 100 lines and follow
-    read -p "Press [Enter] to return to menu (if Ctrl+C didn't exit script)..."
+    sudo journalctl -u $SERVICE_NAME -f -n 100
+    read -p "Press [Enter] to return to menu..."
 }
 
 display_status_snapshot() {
+    if [ -z "$INSTALL_DIR" ]; then INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null) || INSTALL_DIR="N/A"; fi
+    if [ -z "$BOT_USER" ]; then BOT_USER=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null) || BOT_USER="N/A"; fi
     print_divider
     log_info "System Resource Snapshot:"
-    echo "CPU Usage (last 1 min avg): $(uptime | awk -F'load average: ' '{ print $2 }' | cut -d, -f1)"
-    free -h | grep "Mem:" | awk '{print "RAM Usage: " $3 "/" $2 " (Free: " $4 ")"}'
-    df -h / | tail -n 1 | awk '{print "Root Disk Usage: " $3 "/" $2 " (" $5 " Used)"}'
+    echo "CPU Load (1m): $(uptime | awk -F'load average: ' '{ print $2 }' | cut -d, -f1)"
+    free -h | awk '/^Mem:/ {print "RAM Usage: " $3 "/" $2 " (Free: " $4 ")"} /^Swap:/ {print "Swap Usage: " $3 "/" $2 " (Free: " $4 ")"}'
+    df -h / | awk 'NR==2 {print "Root Disk: " $3 "/" $2 " (" $5 " Used)"}'
     print_divider
-    log_info "Service '$SERVICE_NAME' Status:"
+    log_info "Service '$SERVICE_NAME' Status (User: $BOT_USER, Dir: $INSTALL_DIR):"
     sudo systemctl status $SERVICE_NAME --no-pager -n 10 || log_warning "Could not get service status."
     print_divider
-    # Basic check if process is running
     if pgrep -u "$BOT_USER" -f "$INSTALL_DIR/$VENV_NAME/bin/python main.py" > /dev/null; then
         log_success "Bot process seems to be RUNNING."
     else
         log_warning "Bot process seems to be NOT RUNNING."
     fi
     print_divider
-    # Placeholder for Database Status - requires specific DB knowledge
-    # Example if using PostgreSQL:
-    # if command -v psql &> /dev/null; then
-    #   log_info "PostgreSQL Service Status (if applicable):"
-    #   sudo systemctl status postgresql --no-pager || log_warning "Could not get PostgreSQL status."
-    # fi
     read -p "Press [Enter] to continue..."
 }
 
 edit_env_file() {
-    if [ -z "$INSTALL_DIR" ] || [ ! -d "$INSTALL_DIR" ]; then
-        prompt_with_default "Enter installation directory of the bot" "$INSTALL_DIR_DEFAULT" INSTALL_DIR
-        if [ ! -d "$INSTALL_DIR" ]; then log_error "Installation directory $INSTALL_DIR not found."; return; fi
-    fi
-    log_info "Opening .env file for editing: $INSTALL_DIR/.env"
-    log_warning "Ensure you have appropriate permissions or run editor with sudo if needed."
-    sudo nano "$INSTALL_DIR/.env" # Or your preferred editor
+    if [ -z "$INSTALL_DIR" ]; then INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null) || INSTALL_DIR="$INSTALL_DIR_DEFAULT"; fi
+    ENV_FILE_TO_EDIT="$INSTALL_DIR/.env"
+    log_info "Opening .env file for editing: $ENV_FILE_TO_EDIT"
+    sudo nano "$ENV_FILE_TO_EDIT"
     log_info ".env file editing session closed."
     read -p "Press [Enter] to continue..."
 }
 
 train_ai_model_interactive() {
-    if [ -z "$INSTALL_DIR" ] || [ -z "$BOT_USER" ]; then
-        log_warning "Installation directory or bot user not set. Please run full install first or set manually."
-        prompt_with_default "Enter installation directory" "$INSTALL_DIR_DEFAULT" INSTALL_DIR
-        prompt_with_default "Enter bot username" "$BOT_USER_DEFAULT" BOT_USER
-        if [ ! -d "$INSTALL_DIR" ] || ! id "$BOT_USER" &>/dev/null; then
-            log_error "Invalid directory or user."
-            return
-        fi
+    if [ -z "$INSTALL_DIR" ]; then INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null) || INSTALL_DIR="$INSTALL_DIR_DEFAULT"; fi
+    if [ -z "$BOT_USER" ]; then BOT_USER=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null) || BOT_USER="$BOT_USER_DEFAULT"; fi
+    
+    log_info "Attempting to run AI model training as user '$BOT_USER' in $INSTALL_DIR..."
+    if ! sudo -u "$BOT_USER" bash -s -- "$INSTALL_DIR" "$VENV_NAME" << 'EOF_TRAIN_SCRIPT'
+        set -e
+        INSTALL_DIR_TRAIN="$1"
+        VENV_NAME_TRAIN="$2"
+        cd "$INSTALL_DIR_TRAIN"
+        echo "[TRAIN] Activating virtual environment..."
+        source "$VENV_NAME_TRAIN/bin/activate"
+        echo "[TRAIN] Starting train_model.py..."
+        python train_model.py
+        echo "[TRAIN] train_model.py finished."
+        deactivate
+EOF_TRAIN_SCRIPT
+    then
+        log_error "AI Model training script failed. Check output above."
+    else
+        log_success "AI Model training process completed."
     fi
-    log_info "Attempting to run AI model training as user '$BOT_USER'..."
-    sudo -u "$BOT_USER" bash -c "
-        set -e;
-        cd '$INSTALL_DIR';
-        echo '[TRAIN] Activating virtual environment...';
-        source '$VENV_NAME/bin/activate';
-        echo '[TRAIN] Starting train_model.py...';
-        python train_model.py;
-        echo '[TRAIN] train_model.py finished.';
-        deactivate;
-    " || log_error "AI Model training script failed."
-    log_success "AI Model training process completed."
     read -p "Press [Enter] to continue..."
 }
 
 
 # --- Main Menu ---
 main_menu() {
-    # Try to auto-detect INSTALL_DIR and BOT_USER if service exists
-    if [ -f "/etc/systemd/system/$SERVICE_NAME.service" ] && [ -z "$INSTALL_DIR" ]; then
-        INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service")
-        BOT_USER=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service")
-        log_info "Detected INSTALL_DIR: $INSTALL_DIR, BOT_USER: $BOT_USER from service file."
+    if [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
+        DETECTED_INSTALL_DIR=$(grep -Po 'WorkingDirectory=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
+        DETECTED_BOT_USER=$(grep -Po 'User=\K.*' "/etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null)
+        if [ -n "$DETECTED_INSTALL_DIR" ]; then INSTALL_DIR="$DETECTED_INSTALL_DIR"; fi
+        if [ -n "$DETECTED_BOT_USER" ]; then BOT_USER="$DETECTED_BOT_USER"; fi
+        if [ -n "$INSTALL_DIR" ]; then log_info "Detected active INSTALL_DIR: $INSTALL_DIR"; fi
     fi
-
 
     while true; do
         clear
         echo "========================================================="
         echo " FlowAI-ICT-Trading-Bot Management Panel"
-        echo " Project Directory: ${INSTALL_DIR:-Not Set}"
-        echo " Bot User: ${BOT_USER:-Not Set}"
-        echo " Service Name: $SERVICE_NAME"
+        echo " Project Dir: ${INSTALL_DIR:-Not Yet Set}"
+        echo " Bot User   : ${BOT_USER:-Not Yet Set}"
+        echo " Service    : $SERVICE_NAME"
         echo "========================================================="
         echo " --- Installation ---"
         echo "  1. Perform Full Installation / Re-check Prerequisites"
         echo " --- Service Management (systemd) ---"
-        echo "  2. Start Bot Service"
-        echo "  3. Stop Bot Service"
-        echo "  4. Restart Bot Service"
-        echo "  5. View Bot Service Status"
+        echo "  2. Start Bot Service"; echo "  3. Stop Bot Service"
+        echo "  4. Restart Bot Service"; echo "  5. View Bot Service Status"
         echo " --- Monitoring & Logs ---"
         echo "  6. View Live Bot Logs (journalctl)"
         echo "  7. Display System & Service Status Snapshot"
@@ -328,8 +385,8 @@ main_menu() {
         echo "  8. Edit .env Configuration File"
         echo " --- AI Model ---"
         echo "  9. Train AI Model"
-        echo " --- Project Files ---"
-        echo " 10. (Placeholder) Update Project from GitHub" # Needs careful implementation
+        echo " --- Project ---"
+        echo " 10. (Info) Update Project from GitHub"
         echo "---------------------------------------------------------"
         echo "  0. Exit"
         echo "========================================================="
@@ -342,24 +399,34 @@ main_menu() {
             4) check_root; manage_service "restart" ;;
             5) check_root; manage_service "status" ;;
             6) check_root; view_logs ;;
-            7) display_status_snapshot ;; # Root not strictly needed for display, but some commands might be restricted
-            8) check_root; edit_env_file ;; # Edit as root, or guide user
-            9) check_root; train_ai_model_interactive ;; # Run as bot user after setup
-            10) log_warning "Feature 'Update Project from GitHub' not fully implemented yet." 
-                log_info "Manual update: cd $INSTALL_DIR; sudo -u $BOT_USER git pull; sudo systemctl restart $SERVICE_NAME"
-                read -p "Press [Enter] to continue..." ;;
+            7) display_status_snapshot ;;
+            8) check_root; edit_env_file ;;
+            9) check_root; train_ai_model_interactive ;;
+            10) log_info "To update: cd ${INSTALL_DIR:-/path/to/bot}; sudo -u ${BOT_USER:-flowaibot} git pull; sudo systemctl restart $SERVICE_NAME"; read -p "Press [Enter]..." ;;
             0) echo "Exiting management panel."; exit 0 ;;
-            *) log_warning "Invalid choice. Please try again." 
-               read -p "Press [Enter] to continue..." ;;
+            *) log_warning "Invalid choice."; read -p "Press [Enter]..." ;;
         esac
     done
 }
 
 # --- Script Execution Logic ---
+# Save the script's own directory in case we cd elsewhere
+SCRIPT_CWD=$(pwd)
+# Always ensure we check for root unless just displaying help or version
+if [[ "$1" != "--help" && "$1" != "-h" ]]; then
+    check_root # Most operations will need root. Menu options re-check if needed.
+fi
+
+
 if [ "$1" == "--install-only" ]; then
-    check_root
+    # Ensure GITHUB_REPO_URL is set if we are in install-only mode and it's not hardcoded
+    if [ "$GITHUB_REPO_URL" == "YOUR_GITHUB_REPO_URL_HERE" ]; then
+        read -p "Enter GitHub Repository URL (e.g., https://github.com/user/repo.git): " GITHUB_REPO_URL
+        if [ -z "$GITHUB_REPO_URL" ]; then log_fatal "GitHub URL cannot be empty for installation."; fi
+    fi
     perform_installation
     exit 0
 fi
 
+# Default to main menu
 main_menu
