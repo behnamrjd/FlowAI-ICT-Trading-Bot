@@ -7,6 +7,5 @@ mplfinance
 schedule
 joblib
 ccxt
--talib-binary 
-+TA-Lib
+TA-Lib
 tenacity
