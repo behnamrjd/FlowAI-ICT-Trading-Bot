@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# FlowAI Complete Installation & Management Script - Permission Fixed Version
+# FlowAI Complete Installation & Management Script - Final Fixed Version with New Features
 # Handles installation check and provides management menu with all permission fixes
 
 set -e
@@ -191,7 +191,7 @@ activate_environment() {
     # Check installation first
     if [ "$(check_installation)" != "true" ]; then
         log_error "FlowAI environment is not properly installed!"
-        log_info "Please run option 5 (Repair Installation) first."
+        log_info "Please run option 9 (Repair Installation) first."
         return 1
     fi
     
@@ -201,7 +201,7 @@ activate_environment() {
     # Create executable directory
     EXEC_DIR=$(create_exec_dir)
     
-    cat > "$EXEC_DIR/activate_env_fixed.sh" << EOF
+    cat > "$EXEC_DIR/activate_env_fixed.sh" << 'EOF'
 #!/bin/bash
 
 # Set proper environment variables
@@ -217,7 +217,7 @@ unset SUDO_GID
 unset SUDO_COMMAND
 
 # Change to user home directory
-cd "\$HOME"
+cd "$HOME"
 
 # Source conda with error handling
 if [ -f "$MINICONDA_PATH/etc/profile.d/conda.sh" ]; then
@@ -234,9 +234,9 @@ if conda env list | grep -q "$CONDA_ENV_NAME"; then
     # Verify Python is available
     if command -v python >/dev/null 2>&1; then
         echo "🚀 FlowAI environment activated successfully!"
-        echo "Python version: \$(python --version)"
-        echo "Environment: \$CONDA_DEFAULT_ENV"
-        echo "Python executable: \$(which python)"
+        echo "Python version: $(python --version)"
+        echo "Environment: $CONDA_DEFAULT_ENV"
+        echo "Python executable: $(which python)"
     else
         echo "⚠️ Environment activated but Python not found. Installing Python..."
         conda install python=$PYTHON_VERSION -y
@@ -266,6 +266,14 @@ echo "🎯 You are now in the FlowAI environment. Type 'exit' to return to menu.
 exec bash --login
 EOF
 
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/activate_env_fixed.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/activate_env_fixed.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/activate_env_fixed.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/activate_env_fixed.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/activate_env_fixed.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/activate_env_fixed.sh"
+
     chmod +x "$EXEC_DIR/activate_env_fixed.sh"
     chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/activate_env_fixed.sh"
     
@@ -282,7 +290,7 @@ run_trading_bot() {
     # Check installation first
     if [ "$(check_installation)" != "true" ]; then
         log_error "FlowAI environment is not properly installed!"
-        log_info "Please run option 5 (Repair Installation) first."
+        log_info "Please run option 9 (Repair Installation) first."
         return 1
     fi
     
@@ -292,7 +300,7 @@ run_trading_bot() {
     # Create executable directory
     EXEC_DIR=$(create_exec_dir)
     
-    cat > "$EXEC_DIR/run_bot_fixed.sh" << EOF
+    cat > "$EXEC_DIR/run_bot_fixed.sh" << 'EOF'
 #!/bin/bash
 
 # Set proper environment
@@ -300,7 +308,7 @@ export HOME="$USER_HOME"
 export USER="$TARGET_USER"
 unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
-cd "\$HOME"
+cd "$HOME"
 
 # Source conda
 source "$MINICONDA_PATH/etc/profile.d/conda.sh"
@@ -336,7 +344,7 @@ if [ -d "$PROJECT_DIR" ]; then
         ls -la *.py 2>/dev/null || echo "No Python files found"
         echo ""
         echo "📝 Please run manually: python <your_bot_file>.py"
-        echo "📁 Current directory: \$(pwd)"
+        echo "📁 Current directory: $(pwd)"
         echo "📋 Directory contents:"
         ls -la
     fi
@@ -347,12 +355,347 @@ else
 fi
 EOF
 
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/run_bot_fixed.sh"
+
     chmod +x "$EXEC_DIR/run_bot_fixed.sh"
     chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/run_bot_fixed.sh"
     
     sudo -u "$TARGET_USER" -H "$EXEC_DIR/run_bot_fixed.sh"
     
     rm -f "$EXEC_DIR/run_bot_fixed.sh"
+}
+
+# --- Function: Start Trading Bot (Background Service) ---
+start_trading_bot() {
+    log_info "Starting FlowAI Trading Bot as background service..."
+    
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 9 (Repair Installation) first."
+        return 1
+    fi
+    
+    # Check if project directory exists
+    if [ ! -d "$PROJECT_DIR" ]; then
+        log_error "Project directory not found: $PROJECT_DIR"
+        log_info "Please clone the project first"
+        return 1
+    fi
+    
+    # Check if bot is already running
+    if pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" >/dev/null; then
+        log_warning "Trading bot appears to be already running!"
+        echo "Running Python processes:"
+        pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" -l
+        read -p "Do you want to stop existing processes and restart? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            stop_trading_bot
+        else
+            return 1
+        fi
+    fi
+    
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
+    # Find the main bot file
+    BOT_FILE=""
+    for file in "main.py" "bot.py" "run.py" "app.py"; do
+        if [ -f "$PROJECT_DIR/$file" ]; then
+            BOT_FILE="$file"
+            break
+        fi
+    done
+    
+    if [ -z "$BOT_FILE" ]; then
+        log_error "No bot main file found in $PROJECT_DIR"
+        echo "Available Python files:"
+        ls -la "$PROJECT_DIR"/*.py 2>/dev/null || echo "No Python files found"
+        return 1
+    fi
+    
+    # Create start script
+    cat > "$EXEC_DIR/start_bot.sh" << 'EOF'
+#!/bin/bash
+
+# Set proper environment
+export HOME="$USER_HOME"
+export USER="$TARGET_USER"
+unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+
+cd "$HOME"
+
+# Source conda
+source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+
+# Activate environment
+conda activate "$CONDA_ENV_NAME"
+
+# Change to project directory
+cd "$PROJECT_DIR"
+
+# Create logs directory
+mkdir -p logs
+
+# Start bot with logging
+echo "🚀 Starting FlowAI Trading Bot ($BOT_FILE)..."
+echo "📁 Working directory: $(pwd)"
+echo "🐍 Python: $(which python)"
+echo "📝 Log file: logs/bot.log"
+echo "🕒 Started at: $(date)"
+
+# Start bot in background with logging
+nohup python "$BOT_FILE" > logs/bot.log 2>&1 &
+BOT_PID=$!
+
+# Save PID for stopping later
+echo $BOT_PID > "$USER_HOME/.flowai_bot.pid"
+
+echo "✅ Bot started with PID: $BOT_PID"
+echo "📋 To view logs: tail -f $PROJECT_DIR/logs/bot.log"
+echo "🛑 To stop bot: use the stop option in management menu"
+EOF
+
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$BOT_FILE|$BOT_FILE|g" "$EXEC_DIR/start_bot.sh"
+
+    chmod +x "$EXEC_DIR/start_bot.sh"
+    chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/start_bot.sh"
+    
+    # Execute start script
+    sudo -u "$TARGET_USER" -H "$EXEC_DIR/start_bot.sh"
+    
+    rm -f "$EXEC_DIR/start_bot.sh"
+    
+    # Verify bot started
+    sleep 2
+    if [ -f "$USER_HOME/.flowai_bot.pid" ]; then
+        BOT_PID=$(cat "$USER_HOME/.flowai_bot.pid")
+        if ps -p "$BOT_PID" > /dev/null 2>&1; then
+            log_success "Trading bot started successfully! PID: $BOT_PID"
+            echo "📋 View logs: tail -f $PROJECT_DIR/logs/bot.log"
+        else
+            log_error "Bot failed to start. Check logs: $PROJECT_DIR/logs/bot.log"
+        fi
+    else
+        log_error "Failed to start bot"
+    fi
+}
+
+# --- Function: Stop Trading Bot ---
+stop_trading_bot() {
+    log_info "Stopping FlowAI Trading Bot..."
+    
+    STOPPED_ANY=false
+    
+    # Stop using saved PID
+    if [ -f "$USER_HOME/.flowai_bot.pid" ]; then
+        BOT_PID=$(cat "$USER_HOME/.flowai_bot.pid")
+        if ps -p "$BOT_PID" > /dev/null 2>&1; then
+            log_info "Stopping bot with PID: $BOT_PID"
+            kill "$BOT_PID"
+            sleep 2
+            
+            # Force kill if still running
+            if ps -p "$BOT_PID" > /dev/null 2>&1; then
+                log_warning "Force killing bot with PID: $BOT_PID"
+                kill -9 "$BOT_PID"
+            fi
+            
+            STOPPED_ANY=true
+        fi
+        rm -f "$USER_HOME/.flowai_bot.pid"
+    fi
+    
+    # Stop any remaining Python processes that might be the bot
+    PYTHON_PIDS=$(pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" 2>/dev/null || true)
+    if [ -n "$PYTHON_PIDS" ]; then
+        log_info "Found running Python bot processes: $PYTHON_PIDS"
+        read -p "Stop these processes? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            for pid in $PYTHON_PIDS; do
+                log_info "Stopping process: $pid"
+                kill "$pid" 2>/dev/null || true
+                sleep 1
+                # Force kill if still running
+                if ps -p "$pid" > /dev/null 2>&1; then
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
+            done
+            STOPPED_ANY=true
+        fi
+    fi
+    
+    if [ "$STOPPED_ANY" = true ]; then
+        log_success "Trading bot stopped successfully"
+    else
+        log_info "No running bot processes found"
+    fi
+    
+    # Show remaining Python processes
+    REMAINING=$(pgrep -f python 2>/dev/null || true)
+    if [ -n "$REMAINING" ]; then
+        echo ""
+        echo "📋 Remaining Python processes:"
+        ps -f -p $REMAINING 2>/dev/null || true
+    fi
+}
+
+# --- Function: Bot Status ---
+show_bot_status() {
+    log_info "FlowAI Trading Bot Status:"
+    echo ""
+    
+    # Check if PID file exists
+    if [ -f "$USER_HOME/.flowai_bot.pid" ]; then
+        BOT_PID=$(cat "$USER_HOME/.flowai_bot.pid")
+        if ps -p "$BOT_PID" > /dev/null 2>&1; then
+            echo "✅ Bot Status: Running (PID: $BOT_PID)"
+            echo "🕒 Started: $(ps -o lstart= -p "$BOT_PID")"
+            echo "💾 Memory: $(ps -o rss= -p "$BOT_PID" | awk '{print $1/1024 " MB"}')"
+            echo "⏱️  CPU Time: $(ps -o time= -p "$BOT_PID")"
+        else
+            echo "❌ Bot Status: Stopped (PID file exists but process not running)"
+            rm -f "$USER_HOME/.flowai_bot.pid"
+        fi
+    else
+        echo "❌ Bot Status: Stopped"
+    fi
+    
+    # Check for any Python bot processes
+    PYTHON_PIDS=$(pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" 2>/dev/null || true)
+    if [ -n "$PYTHON_PIDS" ]; then
+        echo ""
+        echo "🔍 Found Python bot processes:"
+        for pid in $PYTHON_PIDS; do
+            echo "   PID: $pid - $(ps -o cmd= -p "$pid")"
+        done
+    fi
+    
+    # Show recent logs if available
+    if [ -f "$PROJECT_DIR/logs/bot.log" ]; then
+        echo ""
+        echo "📋 Recent log entries (last 10 lines):"
+        echo "================================"
+        tail -10 "$PROJECT_DIR/logs/bot.log" 2>/dev/null || echo "Cannot read log file"
+        echo "================================"
+        echo "📝 Full log: $PROJECT_DIR/logs/bot.log"
+    fi
+}
+
+# --- Function: Edit .env File ---
+edit_env_file() {
+    log_info "Editing .env configuration file..."
+    
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 9 (Repair Installation) first."
+        return 1
+    fi
+    
+    # Check if project directory exists
+    if [ ! -d "$PROJECT_DIR" ]; then
+        log_error "Project directory not found: $PROJECT_DIR"
+        log_info "Please clone the project first: git clone https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot.git $PROJECT_DIR"
+        return 1
+    fi
+    
+    ENV_FILE="$PROJECT_DIR/.env"
+    
+    # Create .env file if it doesn't exist
+    if [ ! -f "$ENV_FILE" ]; then
+        log_info "Creating new .env file..."
+        cat > "$ENV_FILE" << 'EOF'
+# FlowAI Trading Bot Configuration
+
+# Telegram Bot Settings
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+
+# Trading Settings
+TRADING_PAIR=XAUUSD
+RISK_PERCENTAGE=2
+MAX_DAILY_TRADES=5
+
+# API Keys (if needed)
+BROKER_API_KEY=your_broker_api_key
+BROKER_SECRET=your_broker_secret
+
+# Database Settings (if needed)
+DATABASE_URL=sqlite:///flowai.db
+
+# Logging Level
+LOG_LEVEL=INFO
+EOF
+        chown "$TARGET_USER:$TARGET_USER" "$ENV_FILE"
+        log_success ".env file created at $ENV_FILE"
+    fi
+    
+    # Show current content and edit options
+    echo ""
+    echo "📝 Current .env file content:"
+    echo "================================"
+    cat "$ENV_FILE"
+    echo "================================"
+    echo ""
+    echo "Choose editing method:"
+    echo "1) Edit with nano (recommended)"
+    echo "2) Edit with vim"
+    echo "3) Replace specific value"
+    echo "4) View only (no changes)"
+    echo ""
+    read -p "Choose option (1-4): " edit_choice
+    
+    case $edit_choice in
+        1)
+            sudo -u "$TARGET_USER" nano "$ENV_FILE"
+            ;;
+        2)
+            sudo -u "$TARGET_USER" vim "$ENV_FILE"
+            ;;
+        3)
+            echo "Available variables:"
+            grep -E "^[A-Z_]+" "$ENV_FILE" | cut -d'=' -f1
+            echo ""
+            read -p "Enter variable name to change: " var_name
+            read -p "Enter new value: " var_value
+            
+            if grep -q "^${var_name}=" "$ENV_FILE"; then
+                sed -i "s/^${var_name}=.*/${var_name}=${var_value}/" "$ENV_FILE"
+                log_success "Updated $var_name"
+            else
+                echo "${var_name}=${var_value}" >> "$ENV_FILE"
+                log_success "Added $var_name"
+            fi
+            ;;
+        4)
+            log_info "No changes made to .env file"
+            ;;
+        *)
+            log_error "Invalid option"
+            ;;
+    esac
+    
+    echo ""
+    echo "📝 Updated .env file content:"
+    echo "================================"
+    cat "$ENV_FILE"
+    echo "================================"
 }
 
 # --- Function: Update Packages (Fixed) ---
@@ -362,7 +705,7 @@ update_packages() {
     # Check installation first
     if [ "$(check_installation)" != "true" ]; then
         log_error "FlowAI environment is not properly installed!"
-        log_info "Please run option 5 (Repair Installation) first."
+        log_info "Please run option 9 (Repair Installation) first."
         return 1
     fi
     
@@ -372,7 +715,7 @@ update_packages() {
     # Create executable directory
     EXEC_DIR=$(create_exec_dir)
     
-    cat > "$EXEC_DIR/update_packages_fixed.sh" << EOF
+    cat > "$EXEC_DIR/update_packages_fixed.sh" << 'EOF'
 #!/bin/bash
 
 # Set proper environment
@@ -380,7 +723,7 @@ export HOME="$USER_HOME"
 export USER="$TARGET_USER"
 unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
-cd "\$HOME"
+cd "$HOME"
 
 # Source conda
 source "$MINICONDA_PATH/etc/profile.d/conda.sh"
@@ -434,6 +777,14 @@ except ImportError:
     print('  talib: not available')
 "
 EOF
+
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/update_packages_fixed.sh"
 
     chmod +x "$EXEC_DIR/update_packages_fixed.sh"
     chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/update_packages_fixed.sh"
@@ -600,14 +951,14 @@ repair_installation() {
     EXEC_DIR=$(create_exec_dir)
     
     # Repair conda environment
-    cat > "$EXEC_DIR/repair_env.sh" << EOF
+    cat > "$EXEC_DIR/repair_env.sh" << 'EOF'
 #!/bin/bash
 
 export HOME="$USER_HOME"
 export USER="$TARGET_USER"
 unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
-cd "\$HOME"
+cd "$HOME"
 
 # Source conda
 source "$MINICONDA_PATH/etc/profile.d/conda.sh"
@@ -646,6 +997,13 @@ else
 fi
 EOF
 
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/repair_env.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/repair_env.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/repair_env.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/repair_env.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/repair_env.sh"
+
     chmod +x "$EXEC_DIR/repair_env.sh"
     chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/repair_env.sh"
     
@@ -668,14 +1026,18 @@ show_management_menu() {
         echo "🤖 =================================="
         echo ""
         echo "1) 🚀 Activate Environment"
-        echo "2) 🤖 Run Trading Bot"
-        echo "3) 📦 Update Packages"
-        echo "4) 📊 Show System Status"
-        echo "5) 🔧 Repair Installation"
-        echo "6) 🗑️  Complete Uninstall"
-        echo "7) 🚪 Exit"
+        echo "2) 🤖 Run Trading Bot (Interactive)"
+        echo "3) ▶️  Start Bot (Background Service)"
+        echo "4) ⏹️  Stop Bot Service"
+        echo "5) 📊 Bot Status & Logs"
+        echo "6) ⚙️  Edit .env Configuration"
+        echo "7) 📦 Update Packages"
+        echo "8) 📋 Show System Status"
+        echo "9) 🔧 Repair Installation"
+        echo "10) 🗑️ Complete Uninstall"
+        echo "11) 🚪 Exit"
         echo ""
-        read -p "Choose an option (1-7): " choice
+        read -p "Choose an option (1-11): " choice
         
         case $choice in
             1)
@@ -686,30 +1048,46 @@ show_management_menu() {
                 read -p "Press Enter to continue..."
                 ;;
             3)
-                update_packages
+                start_trading_bot
                 read -p "Press Enter to continue..."
                 ;;
             4)
-                show_status
+                stop_trading_bot
                 read -p "Press Enter to continue..."
                 ;;
             5)
-                repair_installation
+                show_bot_status
                 read -p "Press Enter to continue..."
                 ;;
             6)
+                edit_env_file
+                read -p "Press Enter to continue..."
+                ;;
+            7)
+                update_packages
+                read -p "Press Enter to continue..."
+                ;;
+            8)
+                show_status
+                read -p "Press Enter to continue..."
+                ;;
+            9)
+                repair_installation
+                read -p "Press Enter to continue..."
+                ;;
+            10)
                 uninstall_flowai
                 if [ ! -d "$USER_HOME" ] || [ "$(check_installation)" != "true" ]; then
                     echo "FlowAI has been uninstalled. Exiting..."
                     exit 0
                 fi
                 ;;
-            7)
+            11)
                 log_info "Exiting FlowAI Management..."
                 exit 0
                 ;;
             *)
-                log_error "Invalid option. Please choose 1-7."
+                log_error "Invalid option. Please choose 1-11."
                 ;;
         esac
     done
@@ -792,7 +1170,7 @@ setup_conda_environment() {
     EXEC_DIR=$(create_exec_dir)
     
     # Create environment setup script
-    cat > "$EXEC_DIR/setup_conda_env.sh" << EOF
+    cat > "$EXEC_DIR/setup_conda_env.sh" << 'EOF'
 #!/bin/bash
 set -e
 
@@ -802,35 +1180,42 @@ CONDA_ENV_NAME="$CONDA_ENV_NAME"
 PYTHON_VERSION="$PYTHON_VERSION"
 
 # Set proper environment
-export HOME="\$USER_HOME"
+export HOME="$USER_HOME"
 export USER="$TARGET_USER"
 unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
-cd "\$USER_HOME"
+cd "$USER_HOME"
 
 # Source conda
-source "\$MINICONDA_PATH/etc/profile.d/conda.sh"
+source "$MINICONDA_PATH/etc/profile.d/conda.sh"
 
 # Remove existing environment if exists
-if conda env list | grep -q "\$CONDA_ENV_NAME"; then
+if conda env list | grep -q "$CONDA_ENV_NAME"; then
     echo "Removing existing environment..."
-    conda env remove -n "\$CONDA_ENV_NAME" -y
+    conda env remove -n "$CONDA_ENV_NAME" -y
 fi
 
 # Create new environment with Python
-echo "Creating conda environment: \$CONDA_ENV_NAME"
-conda create -n "\$CONDA_ENV_NAME" python="\$PYTHON_VERSION" -y
+echo "Creating conda environment: $CONDA_ENV_NAME"
+conda create -n "$CONDA_ENV_NAME" python="$PYTHON_VERSION" -y
 
 # Activate environment
-conda activate "\$CONDA_ENV_NAME"
+conda activate "$CONDA_ENV_NAME"
 
 # Verify environment
 echo "Python version in environment:"
 python --version
-echo "Python executable: \$(which python)"
+echo "Python executable: $(which python)"
 
 echo "Conda environment setup completed"
 EOF
+
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/setup_conda_env.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/setup_conda_env.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/setup_conda_env.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/setup_conda_env.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/setup_conda_env.sh"
 
     chmod +x "$EXEC_DIR/setup_conda_env.sh"
     
@@ -852,7 +1237,7 @@ install_python_packages() {
     EXEC_DIR=$(create_exec_dir)
     
     # Create package installation script
-    cat > "$EXEC_DIR/install_packages.sh" << EOF
+    cat > "$EXEC_DIR/install_packages.sh" << 'EOF'
 #!/bin/bash
 set -e
 
@@ -862,17 +1247,17 @@ CONDA_ENV_NAME="$CONDA_ENV_NAME"
 PROJECT_DIR="$PROJECT_DIR"
 
 # Set proper environment
-export HOME="\$USER_HOME"
+export HOME="$USER_HOME"
 export USER="$TARGET_USER"
 unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
-cd "\$USER_HOME"
+cd "$USER_HOME"
 
 # Source conda
-source "\$MINICONDA_PATH/etc/profile.d/conda.sh"
+source "$MINICONDA_PATH/etc/profile.d/conda.sh"
 
 # Activate environment
-conda activate "\$CONDA_ENV_NAME"
+conda activate "$CONDA_ENV_NAME"
 
 # Verify Python is available
 if ! command -v python >/dev/null 2>&1; then
@@ -904,9 +1289,9 @@ echo "Installing python-telegram-bot..."
 pip install python-telegram-bot
 
 # Install requirements.txt if exists
-if [ -f "\$PROJECT_DIR/requirements.txt" ]; then
+if [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo "Installing from requirements.txt..."
-    pip install -r "\$PROJECT_DIR/requirements.txt" || echo "Some requirements failed, continuing..."
+    pip install -r "$PROJECT_DIR/requirements.txt" || echo "Some requirements failed, continuing..."
 fi
 
 # Verify critical imports
@@ -929,6 +1314,14 @@ except Exception as e:
 echo "Package installation completed successfully"
 EOF
 
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/install_packages.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/install_packages.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/install_packages.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/install_packages.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/install_packages.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/install_packages.sh"
+
     chmod +x "$EXEC_DIR/install_packages.sh"
     
     # Execute as target user
@@ -946,7 +1339,7 @@ create_activation_script() {
     log_info "Creating activation script..."
     
     # Create improved activation script
-    cat > "$USER_HOME/activate_flowai.sh" << EOF
+    cat > "$USER_HOME/activate_flowai.sh" << 'EOF'
 #!/bin/bash
 # FlowAI Environment Activation Script - Fixed Version
 
@@ -963,7 +1356,7 @@ unset SUDO_GID
 unset SUDO_COMMAND
 
 # Change to user home
-cd "\$HOME"
+cd "$HOME"
 
 # Source conda
 if [ -f "$MINICONDA_PATH/etc/profile.d/conda.sh" ]; then
@@ -980,8 +1373,8 @@ if conda env list | grep -q "$CONDA_ENV_NAME"; then
     # Verify Python
     if command -v python >/dev/null 2>&1; then
         echo "✅ FlowAI environment activated!"
-        echo "Python version: \$(python --version)"
-        echo "Environment: \$CONDA_DEFAULT_ENV"
+        echo "Python version: $(python --version)"
+        echo "Environment: $CONDA_DEFAULT_ENV"
     else
         echo "⚠️ Installing Python..."
         conda install python=$PYTHON_VERSION -y
@@ -1000,6 +1393,14 @@ fi
 echo "🎯 FlowAI environment is ready!"
 EOF
 
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$USER_HOME/activate_flowai.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$USER_HOME/activate_flowai.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$USER_HOME/activate_flowai.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$USER_HOME/activate_flowai.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$USER_HOME/activate_flowai.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$USER_HOME/activate_flowai.sh"
+
     chmod +x "$USER_HOME/activate_flowai.sh"
     
     if [ "$EUID" -eq 0 ]; then
@@ -1016,7 +1417,7 @@ final_verification() {
     EXEC_DIR=$(create_exec_dir)
     
     # Create verification script
-    cat > "$EXEC_DIR/verify_installation.sh" << EOF
+    cat > "$EXEC_DIR/verify_installation.sh" << 'EOF'
 #!/bin/bash
 set -e
 
@@ -1024,30 +1425,30 @@ USER_HOME="$USER_HOME"
 MINICONDA_PATH="$MINICONDA_PATH"
 CONDA_ENV_NAME="$CONDA_ENV_NAME"
 
-export HOME="\$USER_HOME"
+export HOME="$USER_HOME"
 export USER="$TARGET_USER"
 unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
-cd "\$USER_HOME"
+cd "$USER_HOME"
 
 # Source conda
-source "\$MINICONDA_PATH/etc/profile.d/conda.sh"
+source "$MINICONDA_PATH/etc/profile.d/conda.sh"
 
 # Check if environment exists
-if ! conda env list | grep -q "\$CONDA_ENV_NAME"; then
-    echo "ERROR: Environment \$CONDA_ENV_NAME not found"
+if ! conda env list | grep -q "$CONDA_ENV_NAME"; then
+    echo "ERROR: Environment $CONDA_ENV_NAME not found"
     exit 1
 fi
 
 # Activate and test
-conda activate "\$CONDA_ENV_NAME"
+conda activate "$CONDA_ENV_NAME"
 
 echo "=== Installation Verification ==="
-echo "Conda version: \$(conda --version)"
-echo "Python version: \$(python --version)"
-echo "Pip version: \$(pip --version)"
-echo "Active environment: \$CONDA_DEFAULT_ENV"
-echo "Python executable: \$(which python)"
+echo "Conda version: $(conda --version)"
+echo "Python version: $(python --version)"
+echo "Pip version: $(pip --version)"
+echo "Active environment: $CONDA_DEFAULT_ENV"
+echo "Python executable: $(which python)"
 
 echo "=== Package Verification ==="
 python -c "
@@ -1071,6 +1472,12 @@ except ImportError:
 
 echo "=== Verification Completed ==="
 EOF
+
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/verify_installation.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/verify_installation.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/verify_installation.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/verify_installation.sh"
 
     chmod +x "$EXEC_DIR/verify_installation.sh"
     
@@ -1119,38 +1526,4 @@ perform_installation() {
     log_info "   ✓ Miniconda path: $MINICONDA_PATH"
     log_info ""
     log_info "🚀 To activate the environment:"
-    log_info "   Method 1: source $USER_HOME/activate_flowai.sh"
-    log_info "   Method 2: su - $TARGET_USER && conda activate $CONDA_ENV_NAME"
-    log_info ""
-    log_info "📁 Project directory: $PROJECT_DIR"
-    log_info ""
-}
-
-# --- Main Function ---
-main() {
-    echo "🤖 FlowAI Trading Bot - Installation & Management Script"
-    echo "=================================================="
-    
-    # Check if already installed
-    if [ "$(check_installation)" = "true" ]; then
-        log_success "FlowAI environment is already installed!"
-        show_management_menu
-    else
-        log_info "FlowAI environment not found. Starting installation..."
-        
-        # Check if running as root for installation
-        if [ "$EUID" -ne 0 ]; then
-            log_fatal "Installation requires root privileges. Please run with sudo."
-        fi
-        
-        perform_installation
-        
-        log_info "Installation completed! Starting management menu..."
-        show_management_menu
-    fi
-}
-
-# --- Script Entry Point ---
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
-    main "$@"
-fi
+    log_info "
