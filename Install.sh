@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# FlowAI Complete Installation & Management Script - Final Fixed Version
+# FlowAI Complete Installation & Management Script - Permission Fixed Version
 # Handles installation check and provides management menu with all permission fixes
 
 set -e
@@ -20,38 +20,131 @@ USER_HOME="/home/$TARGET_USER"
 MINICONDA_PATH="$USER_HOME/miniconda3"
 PROJECT_DIR="/opt/FlowAI-ICT-Trading-Bot"
 
-# --- Function: Check Installation Status ---
+# --- Function: Create Executable Directory ---
+create_exec_dir() {
+    # Use user home instead of /tmp to avoid noexec issues
+    EXEC_DIR="$USER_HOME/.flowai_scripts"
+    if [ ! -d "$EXEC_DIR" ]; then
+        mkdir -p "$EXEC_DIR"
+        chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR"
+        chmod 755 "$EXEC_DIR"
+    fi
+    echo "$EXEC_DIR"
+}
+
+# --- Function: Complete System Cleanup ---
+complete_system_cleanup() {
+    log_info "Performing complete system cleanup..."
+    
+    # Stop any running conda processes
+    pkill -f conda || true
+    pkill -f python || true
+    
+    # Remove conda environment
+    if [ -d "$MINICONDA_PATH" ] && sudo -u "$TARGET_USER" bash -c "
+        export HOME='$USER_HOME'
+        export USER='$TARGET_USER'
+        unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+        source '$MINICONDA_PATH/etc/profile.d/conda.sh' 2>/dev/null &&
+        conda env list | grep -q '$CONDA_ENV_NAME'
+    " 2>/dev/null; then
+        sudo -u "$TARGET_USER" bash -c "
+            export HOME='$USER_HOME'
+            export USER='$TARGET_USER'
+            unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+            source '$MINICONDA_PATH/etc/profile.d/conda.sh'
+            conda env remove -n '$CONDA_ENV_NAME' -y
+        " 2>/dev/null || true
+    fi
+    
+    # Remove all conda files and directories
+    rm -rf "$MINICONDA_PATH" 2>/dev/null || true
+    rm -rf "$USER_HOME/.conda" 2>/dev/null || true
+    rm -rf "$USER_HOME/.condarc" 2>/dev/null || true
+    rm -rf "$USER_HOME/.cache/pip" 2>/dev/null || true
+    rm -rf "$USER_HOME/.flowai_scripts" 2>/dev/null || true
+    
+    # Remove activation scripts
+    rm -f "$USER_HOME/activate_flowai.sh" 2>/dev/null || true
+    rm -f "$USER_HOME/simple_activate.sh" 2>/dev/null || true
+    
+    # Clean shell profiles completely
+    for profile in "$USER_HOME/.bashrc" "$USER_HOME/.bash_profile" "$USER_HOME/.profile" "$USER_HOME/.zshrc"; do
+        if [ -f "$profile" ]; then
+            # Remove conda initialization
+            sed -i '/# >>> conda initialize >>>/,/# <<< conda initialize <<</d' "$profile" 2>/dev/null || true
+            # Remove conda exports
+            sed -i '/export.*conda/Id' "$profile" 2>/dev/null || true
+            sed -i '/export.*CONDA/Id' "$profile" 2>/dev/null || true
+            # Remove miniconda paths
+            sed -i '/miniconda3/d' "$profile" 2>/dev/null || true
+        fi
+    done
+    
+    # Clean temporary files from both /tmp and user directory
+    rm -rf /tmp/tmp*conda* 2>/dev/null || true
+    rm -rf /tmp/tmp*miniconda* 2>/dev/null || true
+    rm -rf /tmp/*conda* 2>/dev/null || true
+    rm -rf /tmp/activate_env* 2>/dev/null || true
+    rm -rf /tmp/install_* 2>/dev/null || true
+    rm -rf /tmp/setup_* 2>/dev/null || true
+    rm -rf /tmp/verify_* 2>/dev/null || true
+    rm -rf /tmp/repair_* 2>/dev/null || true
+    rm -rf /tmp/run_bot* 2>/dev/null || true
+    rm -rf /tmp/update_* 2>/dev/null || true
+    
+    # Clean system conda references
+    rm -f /etc/profile.d/conda.sh 2>/dev/null || true
+    
+    # Reset user permissions
+    if id "$TARGET_USER" &>/dev/null; then
+        chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME" 2>/dev/null || true
+        chmod 755 "$USER_HOME" 2>/dev/null || true
+    fi
+    
+    log_success "Complete system cleanup finished"
+}
+
+# --- Function: Enhanced Installation Check ---
 check_installation() {
     local is_installed=true
     
     # Check if user exists
     if ! id "$TARGET_USER" &>/dev/null; then
         is_installed=false
+        echo "$is_installed"
+        return
     fi
     
-    # Check if miniconda exists
-    if [ ! -d "$MINICONDA_PATH" ]; then
+    # Check if miniconda exists and is accessible
+    if [ ! -d "$MINICONDA_PATH" ] || [ ! -f "$MINICONDA_PATH/bin/conda" ]; then
         is_installed=false
+        echo "$is_installed"
+        return
     fi
     
     # Check if conda environment exists and has Python
-    if [ "$is_installed" = true ]; then
-        if ! sudo -u "$TARGET_USER" bash -c "
-            export HOME='$USER_HOME'
-            export USER='$TARGET_USER'
-            unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID
-            source '$MINICONDA_PATH/etc/profile.d/conda.sh' 2>/dev/null &&
-            conda env list | grep -q '$CONDA_ENV_NAME' &&
-            conda activate '$CONDA_ENV_NAME' &&
-            python --version >/dev/null 2>&1
-        " 2>/dev/null; then
-            is_installed=false
-        fi
+    if ! sudo -u "$TARGET_USER" bash -c "
+        export HOME='$USER_HOME'
+        export USER='$TARGET_USER'
+        unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+        cd '$USER_HOME'
+        source '$MINICONDA_PATH/etc/profile.d/conda.sh' 2>/dev/null &&
+        conda env list | grep -q '$CONDA_ENV_NAME' &&
+        conda activate '$CONDA_ENV_NAME' &&
+        command -v python >/dev/null 2>&1 &&
+        python --version >/dev/null 2>&1
+    " 2>/dev/null; then
+        is_installed=false
+        echo "$is_installed"
+        return
     fi
     
-    # Check if activation script exists
-    if [ ! -f "$USER_HOME/activate_flowai.sh" ]; then
+    # Check if activation script exists and is executable
+    if [ ! -f "$USER_HOME/activate_flowai.sh" ] || [ ! -x "$USER_HOME/activate_flowai.sh" ]; then
         is_installed=false
+        echo "$is_installed"
+        return
     fi
     
     echo "$is_installed"
@@ -61,21 +154,32 @@ check_installation() {
 fix_permissions() {
     log_info "Fixing file permissions and ownership..."
     
-    # Fix ownership of all conda files
+    # Ensure user home directory exists and has correct permissions
+    if [ ! -d "$USER_HOME" ]; then
+        mkdir -p "$USER_HOME"
+    fi
+    
+    # Fix ownership of all user files
+    chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME" 2>/dev/null || true
+    
+    # Fix specific conda directories if they exist
     if [ -d "$MINICONDA_PATH" ]; then
-        chown -R "$TARGET_USER:$TARGET_USER" "$MINICONDA_PATH"
+        chown -R "$TARGET_USER:$TARGET_USER" "$MINICONDA_PATH" 2>/dev/null || true
+        chmod -R u+rwX "$MINICONDA_PATH" 2>/dev/null || true
     fi
     
     if [ -d "$USER_HOME/.conda" ]; then
-        chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.conda"
+        chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.conda" 2>/dev/null || true
+        chmod -R u+rwX "$USER_HOME/.conda" 2>/dev/null || true
     fi
     
     if [ -f "$USER_HOME/.condarc" ]; then
-        chown "$TARGET_USER:$TARGET_USER" "$USER_HOME/.condarc"
+        chown "$TARGET_USER:$TARGET_USER" "$USER_HOME/.condarc" 2>/dev/null || true
+        chmod 644 "$USER_HOME/.condarc" 2>/dev/null || true
     fi
     
     # Fix home directory permissions
-    chown "$TARGET_USER:$TARGET_USER" "$USER_HOME"
+    chmod 755 "$USER_HOME" 2>/dev/null || true
     
     log_success "Permissions fixed"
 }
@@ -84,10 +188,20 @@ fix_permissions() {
 activate_environment() {
     log_info "Activating FlowAI environment..."
     
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 5 (Repair Installation) first."
+        return 1
+    fi
+    
     # Fix permissions first
     fix_permissions
     
-    cat > /tmp/activate_env_fixed.sh << EOF
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
+    cat > "$EXEC_DIR/activate_env_fixed.sh" << EOF
 #!/bin/bash
 
 # Set proper environment variables
@@ -152,23 +266,33 @@ echo "🎯 You are now in the FlowAI environment. Type 'exit' to return to menu.
 exec bash --login
 EOF
 
-    chmod +x /tmp/activate_env_fixed.sh
-    chown "$TARGET_USER:$TARGET_USER" /tmp/activate_env_fixed.sh
+    chmod +x "$EXEC_DIR/activate_env_fixed.sh"
+    chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/activate_env_fixed.sh"
     
     # Execute as target user with clean environment
-    sudo -u "$TARGET_USER" -H bash /tmp/activate_env_fixed.sh
+    sudo -u "$TARGET_USER" -H "$EXEC_DIR/activate_env_fixed.sh"
     
-    rm -f /tmp/activate_env_fixed.sh
+    rm -f "$EXEC_DIR/activate_env_fixed.sh"
 }
 
 # --- Function: Run Trading Bot (Fixed) ---
 run_trading_bot() {
     log_info "Starting FlowAI Trading Bot..."
     
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 5 (Repair Installation) first."
+        return 1
+    fi
+    
     # Fix permissions first
     fix_permissions
     
-    cat > /tmp/run_bot_fixed.sh << EOF
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
+    cat > "$EXEC_DIR/run_bot_fixed.sh" << EOF
 #!/bin/bash
 
 # Set proper environment
@@ -223,22 +347,32 @@ else
 fi
 EOF
 
-    chmod +x /tmp/run_bot_fixed.sh
-    chown "$TARGET_USER:$TARGET_USER" /tmp/run_bot_fixed.sh
+    chmod +x "$EXEC_DIR/run_bot_fixed.sh"
+    chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/run_bot_fixed.sh"
     
-    sudo -u "$TARGET_USER" -H bash /tmp/run_bot_fixed.sh
+    sudo -u "$TARGET_USER" -H "$EXEC_DIR/run_bot_fixed.sh"
     
-    rm -f /tmp/run_bot_fixed.sh
+    rm -f "$EXEC_DIR/run_bot_fixed.sh"
 }
 
 # --- Function: Update Packages (Fixed) ---
 update_packages() {
     log_info "Updating FlowAI packages..."
     
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 5 (Repair Installation) first."
+        return 1
+    fi
+    
     # Fix permissions first
     fix_permissions
     
-    cat > /tmp/update_packages_fixed.sh << EOF
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
+    cat > "$EXEC_DIR/update_packages_fixed.sh" << EOF
 #!/bin/bash
 
 # Set proper environment
@@ -301,16 +435,16 @@ except ImportError:
 "
 EOF
 
-    chmod +x /tmp/update_packages_fixed.sh
-    chown "$TARGET_USER:$TARGET_USER" /tmp/update_packages_fixed.sh
+    chmod +x "$EXEC_DIR/update_packages_fixed.sh"
+    chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/update_packages_fixed.sh"
     
-    sudo -u "$TARGET_USER" -H bash /tmp/update_packages_fixed.sh
+    sudo -u "$TARGET_USER" -H "$EXEC_DIR/update_packages_fixed.sh"
     
-    rm -f /tmp/update_packages_fixed.sh
+    rm -f "$EXEC_DIR/update_packages_fixed.sh"
     log_success "Packages updated successfully!"
 }
 
-# --- Function: Uninstall FlowAI ---
+# --- Function: Enhanced Uninstall ---
 uninstall_flowai() {
     log_warning "This will completely remove FlowAI installation!"
     read -p "Are you sure you want to continue? (y/N): " -n 1 -r
@@ -321,57 +455,31 @@ uninstall_flowai() {
         return
     fi
     
-    log_info "Uninstalling FlowAI..."
+    log_info "Performing complete FlowAI uninstallation..."
     
-    # Remove conda environment
-    if sudo -u "$TARGET_USER" bash -c "
-        export HOME='$USER_HOME'
-        export USER='$TARGET_USER'
-        unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID
-        source '$MINICONDA_PATH/etc/profile.d/conda.sh' 2>/dev/null &&
-        conda env list | grep -q '$CONDA_ENV_NAME'
-    " 2>/dev/null; then
-        sudo -u "$TARGET_USER" bash -c "
-            export HOME='$USER_HOME'
-            export USER='$TARGET_USER'
-            unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID
-            source '$MINICONDA_PATH/etc/profile.d/conda.sh'
-            conda env remove -n '$CONDA_ENV_NAME' -y
-        "
-        log_success "Conda environment removed"
-    fi
-    
-    # Remove miniconda (optional)
-    read -p "Remove Miniconda completely? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf "$MINICONDA_PATH"
-        rm -rf "$USER_HOME/.conda"
-        rm -f "$USER_HOME/.condarc"
-        
-        # Clean shell profiles
-        for profile in "$USER_HOME/.bashrc" "$USER_HOME/.bash_profile" "$USER_HOME/.profile"; do
-            if [ -f "$profile" ]; then
-                sed -i '/# >>> conda initialize >>>/,/# <<< conda initialize <<</d' "$profile" 2>/dev/null || true
-            fi
-        done
-        
-        log_success "Miniconda removed completely"
-    fi
-    
-    # Remove activation scripts
-    rm -f "$USER_HOME/activate_flowai.sh"
-    rm -f "$USER_HOME/simple_activate.sh"
+    # Use the complete cleanup function
+    complete_system_cleanup
     
     # Remove user (optional)
-    read -p "Remove user '$TARGET_USER'? (y/N): " -n 1 -r
+    read -p "Remove user '$TARGET_USER' completely? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         userdel -r "$TARGET_USER" 2>/dev/null || true
         log_success "User removed"
     fi
     
-    log_success "FlowAI uninstallation completed!"
+    # Remove project directory (optional)
+    if [ -d "$PROJECT_DIR" ]; then
+        read -p "Remove project directory '$PROJECT_DIR'? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -rf "$PROJECT_DIR"
+            log_success "Project directory removed"
+        fi
+    fi
+    
+    log_success "FlowAI completely uninstalled!"
+    log_info "System is now clean and ready for fresh installation."
 }
 
 # --- Function: Show System Status (Fixed) ---
@@ -388,10 +496,10 @@ show_status() {
     fi
     
     # Check miniconda
-    if [ -d "$MINICONDA_PATH" ]; then
+    if [ -d "$MINICONDA_PATH" ] && [ -f "$MINICONDA_PATH/bin/conda" ]; then
         echo "✅ Miniconda: Installed at $MINICONDA_PATH"
     else
-        echo "❌ Miniconda: Not found"
+        echo "❌ Miniconda: Not found or corrupted"
         return
     fi
     
@@ -400,6 +508,7 @@ show_status() {
         export HOME='$USER_HOME'
         export USER='$TARGET_USER'
         unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+        cd '$USER_HOME'
         source '$MINICONDA_PATH/etc/profile.d/conda.sh' 2>/dev/null &&
         conda env list | grep -q '$CONDA_ENV_NAME'
     " 2>/dev/null; then
@@ -412,6 +521,7 @@ show_status() {
             export HOME='$USER_HOME'
             export USER='$TARGET_USER'
             unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+            cd '$USER_HOME'
             source '$MINICONDA_PATH/etc/profile.d/conda.sh'
             conda activate '$CONDA_ENV_NAME'
             
@@ -456,6 +566,14 @@ except ImportError:
         echo "   💡 Clone with: git clone https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot.git $PROJECT_DIR"
     fi
     
+    # Check overall installation status
+    echo ""
+    if [ "$(check_installation)" = "true" ]; then
+        echo "🎉 Overall Status: ✅ FlowAI is properly installed and ready to use!"
+    else
+        echo "⚠️  Overall Status: ❌ FlowAI installation has issues - use Repair Installation"
+    fi
+    
     echo ""
 }
 
@@ -463,11 +581,26 @@ except ImportError:
 repair_installation() {
     log_info "Repairing FlowAI installation..."
     
-    # Fix permissions
+    # Fix permissions first
     fix_permissions
     
+    # Check if user exists
+    if ! id "$TARGET_USER" &>/dev/null; then
+        log_error "User $TARGET_USER does not exist. Please reinstall completely."
+        return 1
+    fi
+    
+    # Check if miniconda exists
+    if [ ! -d "$MINICONDA_PATH" ] || [ ! -f "$MINICONDA_PATH/bin/conda" ]; then
+        log_error "Miniconda not found. Please reinstall completely."
+        return 1
+    fi
+    
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
     # Repair conda environment
-    cat > /tmp/repair_env.sh << EOF
+    cat > "$EXEC_DIR/repair_env.sh" << EOF
 #!/bin/bash
 
 export HOME="$USER_HOME"
@@ -500,17 +633,29 @@ if conda env list | grep -q "$CONDA_ENV_NAME"; then
     
     echo "✅ Environment repaired successfully!"
 else
-    echo "❌ Environment not found. Please reinstall."
-    exit 1
+    echo "❌ Environment not found. Creating new environment..."
+    conda create -n "$CONDA_ENV_NAME" python=$PYTHON_VERSION -y
+    conda activate "$CONDA_ENV_NAME"
+    
+    # Install packages
+    pip install --upgrade pip
+    pip install numpy pandas requests python-telegram-bot
+    conda install -c conda-forge ta-lib -y || pip install TA-Lib || echo "⚠️ TA-Lib installation failed"
+    
+    echo "✅ Environment created and configured!"
 fi
 EOF
 
-    chmod +x /tmp/repair_env.sh
-    chown "$TARGET_USER:$TARGET_USER" /tmp/repair_env.sh
+    chmod +x "$EXEC_DIR/repair_env.sh"
+    chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/repair_env.sh"
     
-    sudo -u "$TARGET_USER" -H bash /tmp/repair_env.sh
+    sudo -u "$TARGET_USER" -H "$EXEC_DIR/repair_env.sh"
     
-    rm -f /tmp/repair_env.sh
+    rm -f "$EXEC_DIR/repair_env.sh"
+    
+    # Recreate activation script
+    create_activation_script
+    
     log_success "Installation repaired!"
 }
 
@@ -527,7 +672,7 @@ show_management_menu() {
         echo "3) 📦 Update Packages"
         echo "4) 📊 Show System Status"
         echo "5) 🔧 Repair Installation"
-        echo "6) 🗑️  Uninstall FlowAI"
+        echo "6) 🗑️  Complete Uninstall"
         echo "7) 🚪 Exit"
         echo ""
         read -p "Choose an option (1-7): " choice
@@ -554,7 +699,7 @@ show_management_menu() {
                 ;;
             6)
                 uninstall_flowai
-                if [ ! -d "$MINICONDA_PATH" ]; then
+                if [ ! -d "$USER_HOME" ] || [ "$(check_installation)" != "true" ]; then
                     echo "FlowAI has been uninstalled. Exiting..."
                     exit 0
                 fi
@@ -586,34 +731,14 @@ ensure_user_exists() {
     fi
 }
 
-complete_cleanup() {
-    log_info "Performing complete cleanup..."
-    
-    # Remove existing conda installation
-    if [ -d "$MINICONDA_PATH" ]; then
-        log_info "Removing existing miniconda installation..."
-        rm -rf "$MINICONDA_PATH"
-    fi
-    
-    # Remove conda config files
-    rm -rf "$USER_HOME/.conda" 2>/dev/null || true
-    rm -f "$USER_HOME/.condarc" 2>/dev/null || true
-    
-    # Clean conda from shell profiles
-    for profile in "$USER_HOME/.bashrc" "$USER_HOME/.bash_profile" "$USER_HOME/.profile"; do
-        if [ -f "$profile" ]; then
-            sed -i '/# >>> conda initialize >>>/,/# <<< conda initialize <<</d' "$profile" 2>/dev/null || true
-        fi
-    done
-    
-    log_success "Cleanup completed"
-}
-
 install_miniconda_as_user() {
     log_info "Installing Miniconda as user $TARGET_USER..."
     
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
     # Create installation script for user execution
-    cat > /tmp/install_miniconda.sh << 'EOF'
+    cat > "$EXEC_DIR/install_miniconda.sh" << 'EOF'
 #!/bin/bash
 set -e
 
@@ -643,16 +768,16 @@ echo "Initializing conda..."
 echo "Miniconda installation completed"
 EOF
 
-    chmod +x /tmp/install_miniconda.sh
+    chmod +x "$EXEC_DIR/install_miniconda.sh"
     
     # Execute as target user with clean environment
     if [ "$EUID" -eq 0 ]; then
-        sudo -u "$TARGET_USER" -H bash /tmp/install_miniconda.sh "$USER_HOME" "$MINICONDA_PATH"
+        sudo -u "$TARGET_USER" -H "$EXEC_DIR/install_miniconda.sh" "$USER_HOME" "$MINICONDA_PATH"
     else
-        bash /tmp/install_miniconda.sh "$USER_HOME" "$MINICONDA_PATH"
+        "$EXEC_DIR/install_miniconda.sh" "$USER_HOME" "$MINICONDA_PATH"
     fi
     
-    rm /tmp/install_miniconda.sh
+    rm "$EXEC_DIR/install_miniconda.sh"
     
     # Fix permissions after installation
     fix_permissions
@@ -663,8 +788,11 @@ EOF
 setup_conda_environment() {
     log_info "Setting up conda environment..."
     
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
     # Create environment setup script
-    cat > /tmp/setup_conda_env.sh << EOF
+    cat > "$EXEC_DIR/setup_conda_env.sh" << EOF
 #!/bin/bash
 set -e
 
@@ -704,24 +832,27 @@ echo "Python executable: \$(which python)"
 echo "Conda environment setup completed"
 EOF
 
-    chmod +x /tmp/setup_conda_env.sh
+    chmod +x "$EXEC_DIR/setup_conda_env.sh"
     
     # Execute as target user
     if [ "$EUID" -eq 0 ]; then
-        sudo -u "$TARGET_USER" -H bash /tmp/setup_conda_env.sh
+        sudo -u "$TARGET_USER" -H "$EXEC_DIR/setup_conda_env.sh"
     else
-        bash /tmp/setup_conda_env.sh
+        "$EXEC_DIR/setup_conda_env.sh"
     fi
     
-    rm /tmp/setup_conda_env.sh
+    rm "$EXEC_DIR/setup_conda_env.sh"
     log_success "Conda environment created successfully"
 }
 
 install_python_packages() {
     log_info "Installing Python packages..."
     
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
     # Create package installation script
-    cat > /tmp/install_packages.sh << EOF
+    cat > "$EXEC_DIR/install_packages.sh" << EOF
 #!/bin/bash
 set -e
 
@@ -798,16 +929,16 @@ except Exception as e:
 echo "Package installation completed successfully"
 EOF
 
-    chmod +x /tmp/install_packages.sh
+    chmod +x "$EXEC_DIR/install_packages.sh"
     
     # Execute as target user
     if [ "$EUID" -eq 0 ]; then
-        sudo -u "$TARGET_USER" -H bash /tmp/install_packages.sh
+        sudo -u "$TARGET_USER" -H "$EXEC_DIR/install_packages.sh"
     else
-        bash /tmp/install_packages.sh
+        "$EXEC_DIR/install_packages.sh"
     fi
     
-    rm /tmp/install_packages.sh
+    rm "$EXEC_DIR/install_packages.sh"
     log_success "Python packages installed successfully"
 }
 
@@ -881,8 +1012,11 @@ EOF
 final_verification() {
     log_info "Performing final verification..."
     
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
     # Create verification script
-    cat > /tmp/verify_installation.sh << EOF
+    cat > "$EXEC_DIR/verify_installation.sh" << EOF
 #!/bin/bash
 set -e
 
@@ -938,16 +1072,16 @@ except ImportError:
 echo "=== Verification Completed ==="
 EOF
 
-    chmod +x /tmp/verify_installation.sh
+    chmod +x "$EXEC_DIR/verify_installation.sh"
     
     # Execute verification
     if [ "$EUID" -eq 0 ]; then
-        sudo -u "$TARGET_USER" -H bash /tmp/verify_installation.sh
+        sudo -u "$TARGET_USER" -H "$EXEC_DIR/verify_installation.sh"
     else
-        bash /tmp/verify_installation.sh
+        "$EXEC_DIR/verify_installation.sh"
     fi
     
-    rm /tmp/verify_installation.sh
+    rm "$EXEC_DIR/verify_installation.sh"
     log_success "Installation verification completed"
 }
 
@@ -955,11 +1089,11 @@ EOF
 perform_installation() {
     log_info "Starting FlowAI installation process..."
     
-    # Step 1: Ensure user exists
-    ensure_user_exists
+    # Step 1: Complete cleanup first
+    complete_system_cleanup
     
-    # Step 2: Complete cleanup
-    complete_cleanup
+    # Step 2: Ensure user exists
+    ensure_user_exists
     
     # Step 3: Install Miniconda
     install_miniconda_as_user
