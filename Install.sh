@@ -323,7 +323,7 @@ show_management_menu() {
     while true; do
         echo ""
         echo "🤖 =================================="
-        echo "🤖  FlowAI Trading Bot Management"[2][3]
+        echo "🤖  FlowAI Trading Bot Management"
         echo "🤖 =================================="
         echo ""
         echo "1) 🚀 Activate Environment"
@@ -620,7 +620,7 @@ perform_installation() {
 
 # --- Main Function ---
 main() {
-    echo "🤖 FlowAI Trading Bot - Installation & Management Script"[3]
+    echo "🤖 FlowAI Trading Bot - Installation & Management Script"
     echo "=================================================="
     
     # Check if already installed
