@@ -1492,6 +1492,7 @@ EOF
     log_success "Installation verification completed"
 }
 
+
 # --- Function: Perform Installation ---
 perform_installation() {
     log_info "Starting FlowAI installation process..."
@@ -1526,4 +1527,38 @@ perform_installation() {
     log_info "   ✓ Miniconda path: $MINICONDA_PATH"
     log_info ""
     log_info "🚀 To activate the environment:"
-    log_info "
+    log_info "   Method 1: source $USER_HOME/activate_flowai.sh"
+    log_info "   Method 2: su - $TARGET_USER && conda activate $CONDA_ENV_NAME"
+    log_info ""
+    log_info "📁 Project directory: $PROJECT_DIR"
+    log_info ""
+}
+
+# --- Main Function ---
+main() {
+    echo "🤖 FlowAI Trading Bot - Installation & Management Script"
+    echo "=================================================="
+    
+    # Check if already installed
+    if [ "$(check_installation)" = "true" ]; then
+        log_success "FlowAI environment is already installed!"
+        show_management_menu
+    else
+        log_info "FlowAI environment not found. Starting installation..."
+        
+        # Check if running as root for installation
+        if [ "$EUID" -ne 0 ]; then
+            log_fatal "Installation requires root privileges. Please run with sudo."
+        fi
+        
+        perform_installation
+        
+        log_info "Installation completed! Starting management menu..."
+        show_management_menu
+    fi
+}
+
+# --- Script Entry Point ---
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi
