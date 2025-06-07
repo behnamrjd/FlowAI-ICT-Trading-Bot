@@ -355,6 +355,97 @@ fix_main_py_issues() {
     
     cd "$PROJECT_DIR"
     
+    # Check if main.py exists
+    if [[ ! -f "main.py" ]]; then
+        print_warning "main.py not found, skipping fixes"
+        return 0
+    fi
+    
+    # Create backup
+    cp main.py main.py.backup
+    
+    # Fix indentation issues
+    print_info "Fixing indentation issues..."
+    
+    # Convert tabs to spaces
+    sed -i 's/\t/    /g' main.py
+    
+    # Fix specific problematic lines
+    python3 << 'EOF'
+import re
+
+try:
+    with open('main.py', 'r') as f:
+        content = f.read()
+    
+    lines = content.split('\n')
+    fixed_lines = []
+    
+    for i, line in enumerate(lines):
+        line_num = i + 1
+        
+        # Fix common indentation issues
+        if line.strip():
+            # Remove all leading whitespace
+            stripped = line.lstrip()
+            
+            # Determine proper indentation based on context
+            if (stripped.startswith('def ') or 
+                stripped.startswith('class ') or 
+                stripped.startswith('import ') or
+                stripped.startswith('from ') or
+                stripped.startswith('#') and not any(x in stripped for x in ['if', 'for', 'while', 'try'])):
+                # Top level - no indentation
+                fixed_lines.append(stripped)
+            elif (stripped.startswith('if ') or 
+                  stripped.startswith('elif ') or 
+                  stripped.startswith('else:') or
+                  stripped.startswith('for ') or 
+                  stripped.startswith('while ') or
+                  stripped.startswith('try:') or
+                  stripped.startswith('except ') or
+                  stripped.startswith('finally:') or
+                  stripped.startswith('with ')):
+                # Control structures - check if inside function/class
+                prev_lines = [l for l in fixed_lines[-10:] if l.strip()]
+                if prev_lines and any(l.startswith('def ') or l.startswith('class ') for l in prev_lines):
+                    fixed_lines.append('    ' + stripped)  # Inside function/class
+                else:
+                    fixed_lines.append(stripped)  # Top level
+            elif stripped.startswith('return ') or stripped.startswith('break') or stripped.startswith('continue'):
+                # Return/break/continue statements
+                fixed_lines.append('        ' + stripped)
+            else:
+                # Regular statements - check context
+                prev_lines = [l for l in fixed_lines[-5:] if l.strip()]
+                if prev_lines:
+                    last_line = prev_lines[-1]
+                    if last_line.startswith('def ') or last_line.startswith('class '):
+                        fixed_lines.append('    ' + stripped)  # First line in function/class
+                    elif last_line.startswith('    if ') or last_line.startswith('    for ') or last_line.startswith('    while ') or last_line.startswith('    try:'):
+                        fixed_lines.append('        ' + stripped)  # Inside control structure
+                    elif last_line.startswith('    '):
+                        fixed_lines.append('    ' + stripped)  # Same level as previous
+                    else:
+                        fixed_lines.append(stripped)  # Top level
+                else:
+                    fixed_lines.append(stripped)  # Default to top level
+        else:
+            fixed_lines.append('')  # Empty line
+    
+    # Write fixed content
+    with open('main.py', 'w') as f:
+        f.write('\n'.join(fixed_lines))
+    
+    print("✅ Indentation issues fixed automatically")
+    
+except Exception as e:
+    print(f"❌ Error fixing indentation: {e}")
+    # Restore backup
+    import shutil
+    shutil.copy('main.py.backup', 'main.py')
+EOF
+    
     # Fix telegram_bot.test_connection() issue
     if grep -q "telegram_bot.test_connection()" main.py; then
         print_info "Fixing telegram_bot.test_connection() issue..."
@@ -362,57 +453,43 @@ fix_main_py_issues() {
         print_success "telegram_bot.test_connection() issue fixed"
     fi
     
-    # Fix indentation issues around Telegram test
-    print_info "Fixing indentation issues..."
+    # Additional specific fixes for common issues
+    print_info "Applying additional fixes..."
     
-    # Create a temporary fix script
-    cat > fix_indentation.py << 'EOF'
-import re
-
-with open('main.py', 'r') as f:
-    content = f.read()
-
-# Fix the specific indentation issue around line 240-244
-lines = content.split('\n')
-fixed_lines = []
-
-for i, line in enumerate(lines):
-    # Fix the specific pattern we've seen
-    if 'Test Telegram connection' in line and not line.strip().startswith('#'):
-        fixed_lines.append('    # Test Telegram connection')
-    elif 'if config.TELEGRAM_ENABLED:' in line and i > 0:
-        # Ensure proper indentation for the if statement
-        if not line.startswith('    '):
-            fixed_lines.append('    if config.TELEGRAM_ENABLED:')
-        else:
-            fixed_lines.append(line)
-    elif 'logger.info("Running initial trading logic cycle on startup...")' in line:
-        # Ensure this line is properly indented after the if block
-        if not line.startswith('    '):
-            fixed_lines.append('    logger.info("Running initial trading logic cycle on startup...")')
-        else:
-            fixed_lines.append(line)
-    else:
-        fixed_lines.append(line)
-
-# Write back the fixed content
-with open('main.py', 'w') as f:
-    f.write('\n'.join(fixed_lines))
-
-print("Indentation issues fixed")
-EOF
+    # Fix specific line 35 if it's problematic
+    sed -i '35s/^[ \t]*//' main.py
     
-    python fix_indentation.py
-    rm fix_indentation.py
+    # Ensure proper spacing around operators
+    sed -i 's/=/ = /g' main.py
+    sed -i 's/  =  / = /g' main.py
+    
+    # Fix common import issues
+    sed -i 's/^from \./from ./g' main.py
     
     # Verify Python syntax
     print_info "Verifying Python syntax..."
-    if python -m py_compile main.py; then
+    if python3 -m py_compile main.py 2>/dev/null; then
         print_success "main.py syntax verification passed"
+        rm -f main.py.backup
     else
-        print_error "main.py has syntax errors!"
-        exit 1
+        print_error "main.py still has syntax errors, restoring backup"
+        cp main.py.backup main.py
+        
+        # Try simpler fix
+        print_info "Trying simpler indentation fix..."
+        sed -i 's/^[ \t]*//' main.py
+        
+        if python3 -m py_compile main.py 2>/dev/null; then
+            print_success "Simple fix worked"
+            rm -f main.py.backup
+        else
+            print_error "Unable to fix syntax errors automatically"
+            print_warning "Manual intervention may be required"
+            return 1
+        fi
     fi
+    
+    print_success "main.py fixes completed"
 }
 
 train_ai_model() {
@@ -623,18 +700,18 @@ run_installation() {
     check_dependencies || exit 1
     pause_with_message
     
-    # Download and setup
+    # Download and setup FIRST
     download_project || exit 1
+    pause_with_message
+    
+    # THEN fix issues after files exist
+    fix_main_py_issues || exit 1
     pause_with_message
     
     setup_virtual_environment || exit 1
     pause_with_message
     
     install_python_dependencies || exit 1
-    pause_with_message
-    
-    # Fix known issues AFTER download
-    fix_main_py_issues || exit 1
     pause_with_message
     
     # Configuration
