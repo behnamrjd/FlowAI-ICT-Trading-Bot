@@ -13,7 +13,6 @@ log_fatal() { echo -e "\033[31m[FATAL]\033[0m $1"; exit 1; }
 log_success() { echo -e "\033[32m[SUCCESS]\033[0m $1"; }
 
 # --- Configuration Variables ---
-CONDA_ENV_NAME="flowai_env"
 PYTHON_VERSION="3.12"
 TARGET_USER="flowaibot"
 USER_HOME="/home/$TARGET_USER"
@@ -36,26 +35,15 @@ create_exec_dir() {
 complete_system_cleanup() {
     log_info "Performing complete system cleanup..."
     
-    pkill -f conda || true
     pkill -f python || true
     
-    if [ -d "$MINICONDA_PATH" ] && sudo -u "$TARGET_USER" bash -c "
-        export HOME='$USER_HOME'
-        export USER='$TARGET_USER'
-        unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
-        source '$MINICONDA_PATH/etc/profile.d/conda.sh' 2>/dev/null &&
-        conda env list | grep -q '$CONDA_ENV_NAME'
-    " 2>/dev/null; then
-        sudo -u "$TARGET_USER" bash -c "
-            export HOME='$USER_HOME'
-            export USER='$TARGET_USER'
-            unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
-            source '$MINICONDA_PATH/etc/profile.d/conda.sh'
-            conda env remove -n '$CONDA_ENV_NAME' -y
-        " 2>/dev/null || true
+    # Remove virtual environment
+    if [ -d "$VENV_PATH" ]; then
+        rm -rf "$VENV_PATH" 2>/dev/null || true
     fi
     
-    rm -rf "$VENV_PATH" 2>/dev/null || true
+    # Remove old conda files (if any exist)
+    rm -rf "$USER_HOME/miniconda3" 2>/dev/null || true
     rm -rf "$USER_HOME/.conda" 2>/dev/null || true
     rm -rf "$USER_HOME/.condarc" 2>/dev/null || true
     rm -rf "$USER_HOME/.cache/pip" 2>/dev/null || true
@@ -70,6 +58,7 @@ complete_system_cleanup() {
             sed -i '/export.*conda/Id' "$profile" 2>/dev/null || true
             sed -i '/export.*CONDA/Id' "$profile" 2>/dev/null || true
             sed -i '/miniconda3/d' "$profile" 2>/dev/null || true
+            sed -i '/flowai_venv/d' "$profile" 2>/dev/null || true
         fi
     done
     
@@ -93,6 +82,7 @@ complete_system_cleanup() {
     
     log_success "Complete system cleanup finished"
 }
+
 
 # --- Function: Enhanced Installation Check ---
 check_installation() {
@@ -449,33 +439,84 @@ validate_configuration() {
     log_info "Validating bot configuration..."
     
     if [ ! -f "$PROJECT_DIR/.env" ]; then
-        log_error ".env file not found"
+        log_error ".env file not found at $PROJECT_DIR/.env"
+        log_info "Please create .env file or use the configuration menu"
         return 1
     fi
     
-    # Check for required variables
+    # Check if .env file is readable
+    if [ ! -r "$PROJECT_DIR/.env" ]; then
+        log_error ".env file is not readable"
+        chown "$TARGET_USER:$TARGET_USER" "$PROJECT_DIR/.env"
+        chmod 644 "$PROJECT_DIR/.env"
+    fi
+    
     local required_vars=("TELEGRAM_BOT_TOKEN" "TELEGRAM_CHAT_ID")
     local missing_vars=()
+    local empty_vars=()
     
-for var in "${required_vars[@]}"; do
-    if ! grep -q "^${var}=" "$PROJECT_DIR/.env"; then
-        missing_vars+=("$var")
-    elif grep -q "^${var}=your_bot_token_here\|^${var}=your_chat_id_here\|^${var}=your_.*_here" "$PROJECT_DIR/.env"; then
-        missing_vars+=("$var")
-    elif [ "$(grep "^${var}=" "$PROJECT_DIR/.env" | cut -d'=' -f2)" = "" ]; then
-        missing_vars+=("$var")
-    fi
-done
-
+    for var in "${required_vars[@]}"; do
+        if ! grep -q "^${var}=" "$PROJECT_DIR/.env"; then
+            missing_vars+=("$var")
+        else
+            # Get the value after the = sign
+            local value=$(grep "^${var}=" "$PROJECT_DIR/.env" | cut -d'=' -f2- | tr -d ' "'"'"'')
+            
+            # Check if it's a placeholder value
+            if [[ "$value" =~ ^your_.*_here$ ]] || [[ "$value" == "your_bot_token_here" ]] || [[ "$value" == "your_chat_id_here" ]]; then
+                missing_vars+=("$var (placeholder value)")
+            elif [ -z "$value" ]; then
+                empty_vars+=("$var")
+            fi
+        fi
+    done
     
+    # Report validation results
     if [ ${#missing_vars[@]} -gt 0 ]; then
-        log_error "Missing or unconfigured variables: ${missing_vars[*]}"
+        log_error "Missing or unconfigured variables:"
+        for var in "${missing_vars[@]}"; do
+            echo "   ❌ $var"
+        done
+    fi
+    
+    if [ ${#empty_vars[@]} -gt 0 ]; then
+        log_error "Empty variables:"
+        for var in "${empty_vars[@]}"; do
+            echo "   ⚠️  $var"
+        done
+    fi
+    
+    # Check for common configuration issues
+    if grep -q "^TELEGRAM_BOT_TOKEN=" "$PROJECT_DIR/.env"; then
+        local token=$(grep "^TELEGRAM_BOT_TOKEN=" "$PROJECT_DIR/.env" | cut -d'=' -f2- | tr -d ' "'"'"'')
+        if [[ ! "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]] && [[ "$token" != "your_bot_token_here" ]]; then
+            log_warning "TELEGRAM_BOT_TOKEN format may be incorrect (should be: 123456789:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)"
+        fi
+    fi
+    
+    if grep -q "^TELEGRAM_CHAT_ID=" "$PROJECT_DIR/.env"; then
+        local chat_id=$(grep "^TELEGRAM_CHAT_ID=" "$PROJECT_DIR/.env" | cut -d'=' -f2- | tr -d ' "'"'"'')
+        if [[ ! "$chat_id" =~ ^-?[0-9]+$ ]] && [[ "$chat_id" != "your_chat_id_here" ]]; then
+            log_warning "TELEGRAM_CHAT_ID should be a number (e.g., 123456789 or -123456789)"
+        fi
+    fi
+    
+    # Final validation
+    if [ ${#missing_vars[@]} -gt 0 ] || [ ${#empty_vars[@]} -gt 0 ]; then
+        echo ""
+        log_error "Configuration validation failed"
+        echo "💡 To fix this:"
+        echo "   1. Use option 7 (Edit .env Configuration) from the menu"
+        echo "   2. Or manually edit: $PROJECT_DIR/.env"
+        echo ""
         return 1
     fi
     
     log_success "Configuration validation passed"
+    echo "✅ All required variables are properly configured"
     return 0
 }
+
 
 # --- Function: Create .env File ---
 create_env_file() {
@@ -646,7 +687,6 @@ run_trading_bot() {
     
     if [ "$(check_installation)" != "true" ]; then
         log_error "FlowAI environment is not properly installed!"
-        log_info "Please run option 9 (Repair Installation) first."
         return 1
     fi
     
@@ -666,8 +706,8 @@ cd "$HOME"
 source "$VENV_PATH/bin/activate"
 
 if ! command -v python >/dev/null 2>&1; then
-    echo "⚠️ Python not found. Installing..."
-    conda install python=$PYTHON_VERSION -y
+    echo "⚠️ Python not found in virtual environment"
+    exit 1
 fi
 
 if [ -d "$PROJECT_DIR" ]; then
@@ -690,26 +730,16 @@ if [ -d "$PROJECT_DIR" ]; then
     else
         echo "❌ Bot main file not found. Available Python files:"
         ls -la *.py 2>/dev/null || echo "No Python files found"
-        echo ""
-        echo "📝 Please run manually: python <your_bot_file>.py"
-        echo "📁 Current directory: $(pwd)"
-        echo "📋 Directory contents:"
-        ls -la
     fi
 else
     echo "❌ Project directory not found: $PROJECT_DIR"
-    echo "📁 Please ensure the FlowAI project is properly installed"
-    echo "💡 You can clone it with: git clone $PROJECT_REPO $PROJECT_DIR"
 fi
 EOF
 
     sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/run_bot_fixed.sh"
     sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/run_bot_fixed.sh"
-    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/run_bot_fixed.sh"
-    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/run_bot_fixed.sh"
-    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$VENV_PATH|$VENV_PATH|g" "$EXEC_DIR/run_bot_fixed.sh"
     sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/run_bot_fixed.sh"
-    sed -i "s|\$PROJECT_REPO|$PROJECT_REPO|g" "$EXEC_DIR/run_bot_fixed.sh"
 
     chmod +x "$EXEC_DIR/run_bot_fixed.sh"
     chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/run_bot_fixed.sh"
@@ -719,26 +749,23 @@ EOF
     rm -f "$EXEC_DIR/run_bot_fixed.sh"
 }
 
+
 # --- Function: Start Trading Bot (Background Service) ---
 start_trading_bot() {
     log_info "Starting FlowAI Trading Bot as background service..."
     
     if [ "$(check_installation)" != "true" ]; then
         log_error "FlowAI environment is not properly installed!"
-        log_info "Please run option 9 (Repair Installation) first."
         return 1
     fi
     
     if [ ! -d "$PROJECT_DIR" ]; then
         log_error "Project directory not found: $PROJECT_DIR"
-        log_info "Please clone the project first"
         return 1
     fi
     
     if pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" >/dev/null; then
         log_warning "Trading bot appears to be already running!"
-        echo "Running Python processes:"
-        pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" -l
         read -p "Do you want to stop existing processes and restart? (y/N): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -760,8 +787,6 @@ start_trading_bot() {
     
     if [ -z "$BOT_FILE" ]; then
         log_error "No bot main file found in $PROJECT_DIR"
-        echo "Available Python files:"
-        ls -la "$PROJECT_DIR"/*.py 2>/dev/null || echo "No Python files found"
         return 1
     fi
     
@@ -792,14 +817,11 @@ BOT_PID=$!
 echo $BOT_PID > "$USER_HOME/.flowai_bot.pid"
 
 echo "✅ Bot started with PID: $BOT_PID"
-echo "📋 To view logs: tail -f $PROJECT_DIR/logs/bot.log"
-echo "🛑 To stop bot: use the stop option in management menu"
 EOF
 
     sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/start_bot.sh"
     sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/start_bot.sh"
-    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/start_bot.sh"
-    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$VENV_PATH|$VENV_PATH|g" "$EXEC_DIR/start_bot.sh"
     sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/start_bot.sh"
     sed -i "s|\$BOT_FILE|$BOT_FILE|g" "$EXEC_DIR/start_bot.sh"
 
@@ -815,14 +837,12 @@ EOF
         BOT_PID=$(cat "$USER_HOME/.flowai_bot.pid")
         if ps -p "$BOT_PID" > /dev/null 2>&1; then
             log_success "Trading bot started successfully! PID: $BOT_PID"
-            echo "📋 View logs: tail -f $PROJECT_DIR/logs/bot.log"
         else
             log_error "Bot failed to start. Check logs: $PROJECT_DIR/logs/bot.log"
         fi
-    else
-        log_error "Failed to start bot"
     fi
 }
+
 
 # --- Function: Stop Trading Bot ---
 stop_trading_bot() {
@@ -1129,10 +1149,10 @@ show_status() {
         return
     fi
     
-    if [ -d "$MINICONDA_PATH" ] && [ -f "$MINICONDA_PATH/bin/conda" ]; then
-        echo "✅ Miniconda: Installed at $MINICONDA_PATH"
+    if [ -d "$VENV_PATH" ] && [ -f "$VENV_PATH/bin/python" ]; then
+        echo "✅ Virtual Environment: $VENV_PATH"
     else
-        echo "❌ Miniconda: Not found or corrupted"
+        echo "❌ Virtual Environment: Not found or corrupted"
         return
     fi
     
@@ -1141,10 +1161,10 @@ show_status() {
         export USER='$TARGET_USER'
         unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
         cd '$USER_HOME'
-        source '$MINICONDA_PATH/etc/profile.d/conda.sh' 2>/dev/null &&
-        conda env list | grep -q '$CONDA_ENV_NAME'
+        source '$VENV_PATH/bin/activate' 2>/dev/null &&
+        command -v python >/dev/null 2>&1
     " 2>/dev/null; then
-        echo "✅ Conda Environment: $CONDA_ENV_NAME (exists)"
+        echo "✅ Python Environment: Active and functional"
         
         echo ""
         echo "📦 Package Status:"
@@ -1153,34 +1173,43 @@ show_status() {
             export USER='$TARGET_USER'
             unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
             cd '$USER_HOME'
-            source '$MINICONDA_PATH/etc/profile.d/conda.sh'
-            conda activate '$CONDA_ENV_NAME'
+            source '$VENV_PATH/bin/activate'
             
             if command -v python >/dev/null 2>&1; then
                 python -c \"
 import sys
 print(f'   🐍 Python: {sys.version.split()[0]} ({sys.executable})')
 
-packages = ['numpy', 'pandas', 'requests', 'telegram']
+packages = ['numpy', 'pandas', 'requests', 'telegram', 'ta']
 for pkg in packages:
     try:
         module = __import__(pkg)
-        print(f'   ✅ {pkg}: {getattr(module, \\\"__version__\\\", \\\"unknown\\\")}')
+        version = getattr(module, '__version__', 'unknown')
+        if pkg == 'ta' and version == 'unknown':
+            version = '0.10.2 (estimated)'
+        print(f'   ✅ {pkg}: {version}')
     except ImportError:
         print(f'   ❌ {pkg}: not installed')
 
+# Test TA library functionality
 try:
-    import talib
-    print(f'   ✅ talib: {talib.__version__}')
-except ImportError:
-    print('   ⚠️  talib: not available')
+    import ta
+    import pandas as pd
+    import numpy as np
+    
+    # Quick functionality test
+    data = pd.DataFrame({'close': np.random.random(10) * 100 + 50})
+    sma = ta.trend.sma_indicator(data['close'], window=5)
+    print('   ✅ TA library: Functionality test passed')
+except Exception as e:
+    print(f'   ⚠️ TA library: Test failed - {str(e)[:50]}...')
 \"
             else
-                echo '   ❌ Python: not found in environment'
+                echo '   ❌ Python: not found in virtual environment'
             fi
         " 2>/dev/null || echo "   ❌ Cannot check packages - environment may need repair"
     else
-        echo "❌ Conda Environment: $CONDA_ENV_NAME (not found)"
+        echo "❌ Python Environment: Not functional"
     fi
     
     if [ -d "$PROJECT_DIR" ]; then
@@ -1196,6 +1225,17 @@ except ImportError:
         else
             echo "   ⚠️  Configuration file (.env) missing"
         fi
+        
+        if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+            echo "   ✅ Requirements file exists"
+            if grep -q "ta==0.10.2" "$PROJECT_DIR/requirements.txt"; then
+                echo "   ✅ TA library (ta==0.10.2) in requirements"
+            else
+                echo "   ⚠️  TA library not in requirements"
+            fi
+        else
+            echo "   ⚠️  Requirements file missing"
+        fi
     else
         echo "❌ Project Directory: Not found"
         echo "   💡 Clone with: git clone $PROJECT_REPO $PROJECT_DIR"
@@ -1210,6 +1250,7 @@ except ImportError:
     
     echo ""
 }
+
 
 # --- Function: Repair Installation ---
 repair_installation() {
@@ -1384,19 +1425,40 @@ ensure_user_exists() {
         log_info "Creating user: $TARGET_USER"
         if [ "$EUID" -eq 0 ]; then
             useradd -m -s /bin/bash "$TARGET_USER"
+            usermod -aG sudo "$TARGET_USER"
+            
+            # Set up sudo without password for installation
             echo "$TARGET_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$TARGET_USER"
             chmod 440 "/etc/sudoers.d/$TARGET_USER"
-            usermod -aG sudo "$TARGET_USER"
+            
             log_success "User $TARGET_USER created successfully"
         else
             log_fatal "User $TARGET_USER does not exist and cannot create without root privileges"
         fi
     else
         log_info "User $TARGET_USER already exists"
+        
+        # Ensure sudo permissions are set
+        if [ "$EUID" -eq 0 ]; then
+            if [ ! -f "/etc/sudoers.d/$TARGET_USER" ]; then
+                log_info "Setting up sudo permissions for existing user..."
+                echo "$TARGET_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$TARGET_USER"
+                chmod 440 "/etc/sudoers.d/$TARGET_USER"
+                log_success "Sudo permissions configured"
+            fi
+        fi
+    fi
+    
+    # Ensure user home directory exists and has correct permissions
+    if [ ! -d "$USER_HOME" ]; then
+        mkdir -p "$USER_HOME"
+        chown "$TARGET_USER:$TARGET_USER" "$USER_HOME"
+        chmod 755 "$USER_HOME"
     fi
     
     fix_project_permissions
 }
+
 
 setup_python_environment() {
     log_info "Setting up Python virtual environment..."
