@@ -1368,108 +1368,8 @@ ensure_user_exists() {
     fix_project_permissions
 }
 
-install_miniconda_as_user() {
-    log_info "Installing Miniconda as user $TARGET_USER..."
-    
-    EXEC_DIR=$(create_exec_dir)
-    
-    cat > "$EXEC_DIR/install_miniconda.sh" << 'EOF'
-#!/bin/bash
-set -e
 
-USER_HOME="$1"
-MINICONDA_PATH="$2"
 
-export HOME="$USER_HOME"
-export USER="flowaibot"
-unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
-
-cd "$USER_HOME"
-
-echo "Downloading Miniconda..."
-wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-
-echo "Installing Miniconda..."
-bash miniconda.sh -b -p "$MINICONDA_PATH"
-rm miniconda.sh
-
-echo "Initializing conda..."
-"$MINICONDA_PATH/bin/conda" init bash
-
-echo "Miniconda installation completed"
-EOF
-
-    chmod +x "$EXEC_DIR/install_miniconda.sh"
-    
-    if [ "$EUID" -eq 0 ]; then
-        sudo -u "$TARGET_USER" -H "$EXEC_DIR/install_miniconda.sh" "$USER_HOME" "$MINICONDA_PATH"
-    else
-        "$EXEC_DIR/install_miniconda.sh" "$USER_HOME" "$MINICONDA_PATH"
-    fi
-    
-    rm "$EXEC_DIR/install_miniconda.sh"
-    
-    fix_permissions
-    
-    log_success "Miniconda installed successfully"
-}
-
-setup_conda_environment() {
-    log_info "Setting up conda environment..."
-    
-    EXEC_DIR=$(create_exec_dir)
-    
-    cat > "$EXEC_DIR/setup_conda_env.sh" << 'EOF'
-#!/bin/bash
-set -e
-
-USER_HOME="$USER_HOME"
-MINICONDA_PATH="$MINICONDA_PATH"
-CONDA_ENV_NAME="$CONDA_ENV_NAME"
-PYTHON_VERSION="$PYTHON_VERSION"
-
-export HOME="$USER_HOME"
-export USER="$TARGET_USER"
-unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
-
-cd "$USER_HOME"
-
-source "$MINICONDA_PATH/etc/profile.d/conda.sh"
-
-if conda env list | grep -q "$CONDA_ENV_NAME"; then
-    echo "Removing existing environment..."
-    conda env remove -n "$CONDA_ENV_NAME" -y
-fi
-
-echo "Creating conda environment: $CONDA_ENV_NAME"
-conda create -n "$CONDA_ENV_NAME" python="$PYTHON_VERSION" -y
-
-conda activate "$CONDA_ENV_NAME"
-
-echo "Python version in environment:"
-python --version
-echo "Python executable: $(which python)"
-
-echo "Conda environment setup completed"
-EOF
-
-    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/setup_conda_env.sh"
-    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/setup_conda_env.sh"
-    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/setup_conda_env.sh"
-    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/setup_conda_env.sh"
-    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/setup_conda_env.sh"
-
-    chmod +x "$EXEC_DIR/setup_conda_env.sh"
-    
-    if [ "$EUID" -eq 0 ]; then
-        sudo -u "$TARGET_USER" -H "$EXEC_DIR/setup_conda_env.sh"
-    else
-        "$EXEC_DIR/setup_conda_env.sh"
-    fi
-    
-    rm "$EXEC_DIR/setup_conda_env.sh"
-    log_success "Conda environment created successfully"
-}
 
 install_python_packages() {
     log_info "Installing Python packages..."
@@ -1514,74 +1414,51 @@ pip install python-binance apscheduler click tqdm pyarrow
 echo "Installing utility packages..."
 pip install numba
 
-echo "Installing TA-Lib with comprehensive checks..."
-
-# Step 1: Check if TA-Lib C library is available
-if ldconfig -p | grep -q libta_lib; then
-    echo "✅ TA-Lib C library found in system"
-    TA_LIB_AVAILABLE=true
-else
-    echo "⚠️ TA-Lib C library not found, installing manually..."
-    TA_LIB_AVAILABLE=false
-fi
-
-# Step 2: Install TA-Lib C library if needed
-if [ "$TA_LIB_AVAILABLE" = false ]; then
 echo "Installing TA-Lib C library from source..."
 cd /tmp
 
 # Clean any previous attempts
-rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
+rm -rf ta-lib ta-lib-0.6.4-src.tar.gz
 
-wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-tar -xzf ta-lib-0.4.0-src.tar.gz
-cd ta-lib/
+# Download latest version
+wget -q https://downloads.sourceforge.net/project/ta-lib/ta-lib/0.6.4/ta-lib-0.6.4-src.tar.gz
+tar -xzf ta-lib-0.6.4-src.tar.gz
+cd ta-lib-0.6.4/
 
-wget 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD' -O './config.guess'
-wget 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD' -O './config.sub'
-
-# Configure and install (بر اساس نتایج جستجو[6])
+# Configure and install
 ./configure --prefix=/usr
 make
 sudo make install
+
+# Update library cache
 sudo ldconfig
-    
-    # Verify installation
-    if ldconfig -p | grep -q libta_lib; then
-        echo "✅ TA-Lib C library installed successfully"
-    else
-        echo "❌ TA-Lib C library installation failed"
-        cd "$USER_HOME"
-        exit 1
-    fi
-    
-    # Clean up
-    cd /tmp
-    rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
-    cd "$USER_HOME"
+
+# Verify installation
+if ldconfig -p | grep -q libta_lib; then
+    echo "✅ TA-Lib C library installed successfully"
+else
+    echo "❌ TA-Lib C library installation failed"
+    exit 1
 fi
 
-# Step 3: Set environment variables for Python wrapper
-export TA_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu"
-export TA_INCLUDE_PATH="/usr/local/include:/usr/include"
-export CFLAGS="-I/usr/local/include -I/usr/include"
-export LDFLAGS="-L/usr/local/lib -L/usr/lib/x86_64-linux-gnu"
+# Return to user directory
+cd "$USER_HOME"
 
-# Step 4: Install Python TA-Lib wrapper
-echo "Installing TA-Lib Python wrapper..."
-if pip install TA-Lib --no-cache-dir --verbose; then
+# Set environment variables
+export TA_LIBRARY_PATH="/usr/lib"
+export TA_INCLUDE_PATH="/usr/include"
+export CFLAGS="-I/usr/include"
+export LDFLAGS="-L/usr/lib"
+
+# Install Python wrapper
+if pip install TA-Lib --no-cache-dir; then
     echo "✅ TA-Lib Python wrapper installed successfully"
 else
-    echo "❌ TA-Lib Python wrapper installation failed"
-    echo "Trying alternative installation methods..."
-    
-    # Try with specific flags
-    if pip install TA-Lib --no-cache-dir --global-option=build_ext --global-option="-I/usr/local/include" --global-option="-L/usr/local/lib"; then
-        echo "✅ TA-Lib installed with custom flags"
-    else
-        echo "⚠️ TA-Lib installation failed, continuing without it"
-    fi
+    echo "❌ TA-Lib installation failed completely"
 fi
+
+# Clean up
+rm -rf /tmp/ta-lib-0.6.4 /tmp/ta-lib-0.6.4-src.tar.gz
 
 echo "Installing python-telegram-bot..."
 pip install python-telegram-bot
@@ -1608,7 +1485,7 @@ import sys
 print('Python executable:', sys.executable)
 print('Python version:', sys.version)
 
-packages = ['numpy', 'pandas', 'requests']
+packages = ['numpy', 'pandas', 'requests', 'sklearn']
 for pkg in packages:
     try:
         module = __import__(pkg)
@@ -1655,6 +1532,7 @@ EOF
     rm "$EXEC_DIR/install_packages.sh"
     log_success "Python packages installed successfully"
 }
+
 
 create_activation_script() {
     log_info "Creating activation script..."
