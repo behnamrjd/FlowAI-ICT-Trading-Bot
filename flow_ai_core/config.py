@@ -31,7 +31,7 @@ list_float = "list_float"
 
 
 # Telegram Configuration
-TELEGRAM_TOKEN = get_env_var("TELEGRAM_TOKEN")
+TELEGRAM_BOT_TOKEN = get_env_var("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = get_env_var("TELEGRAM_CHAT_ID")
 
 # Trading Configuration
@@ -107,8 +107,8 @@ HTF_LEVEL_LOOKBACK_4H = get_env_var("HTF_LEVEL_LOOKBACK_4H", 60, var_type=int) #
 price_precision = 5 if 'XAU' in SYMBOL.upper() else 2 # Used in main.py for formatting
 
 # Validate essential configurations
-if not TELEGRAM_TOKEN:
-    logger.critical("TELEGRAM_TOKEN is not set. Bot cannot start.")
+if not TELEGRAM_BOT_TOKEN:
+    logger.critical("TELEGRAM_BOT_TOKEN is not set. Bot cannot start.")
     # exit(1) # Or raise an error
 if not TELEGRAM_CHAT_ID:
     logger.critical("TELEGRAM_CHAT_ID is not set. Bot cannot send messages.")
