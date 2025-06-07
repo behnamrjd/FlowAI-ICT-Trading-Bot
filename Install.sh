@@ -14,7 +14,7 @@ log_success() { echo -e "\033[32m[SUCCESS]\033[0m $1"; }
 
 # --- Configuration Variables ---
 CONDA_ENV_NAME="flowai_env"
-PYTHON_VERSION="3.12"
+PYTHON_VERSION="3.11"
 TARGET_USER="flowaibot"
 USER_HOME="/home/$TARGET_USER"
 MINICONDA_PATH="$USER_HOME/miniconda3"
@@ -819,12 +819,12 @@ else
     pip install --upgrade numpy pandas matplotlib seaborn requests python-telegram-bot scikit-learn
 fi
 
-# Update TA-Lib with better error handling
+# Update TA-Lib with better error handling for Python 3.11
 echo "📦 Updating TA-Lib..."
 if conda install -c conda-forge ta-lib -y; then
-    echo "✅ TA-Lib updated via conda"
-elif pip install --upgrade TA-Lib --no-cache-dir; then
-    echo "✅ TA-Lib updated via pip"
+    echo "✅ TA-Lib updated via conda-forge"
+elif conda install -c conda-forge libta-lib -y && pip install --upgrade TA-Lib --no-cache-dir; then
+    echo "✅ TA-Lib updated via conda C library + pip wrapper"
 else
     echo "⚠️ TA-Lib update failed - but existing version should still work"
 fi
@@ -1863,12 +1863,19 @@ pip install numpy pandas matplotlib seaborn requests aiohttp
 echo "Installing ML packages..."
 pip install scikit-learn
 
-# Install TA-Lib via conda (most reliable method)
+# Install TA-Lib via conda (most reliable method for Python 3.11)
 echo "Installing TA-Lib..."
-conda install -c conda-forge ta-lib -y || {
-    echo "Conda TA-Lib failed, trying pip..."
-    pip install TA-Lib || echo "TA-Lib installation failed, continuing..."
-}
+if conda install -c conda-forge ta-lib -y; then
+    echo "✅ TA-Lib installed via conda-forge"
+else
+    echo "⚠️ Conda TA-Lib failed, trying libta-lib first..."
+    if conda install -c conda-forge libta-lib -y; then
+        echo "✅ TA-Lib C library installed"
+        pip install TA-Lib --no-cache-dir || echo "⚠️ TA-Lib Python wrapper failed"
+    else
+        echo "⚠️ TA-Lib installation failed completely"
+    fi
+fi
 
 # Install Telegram bot library
 echo "Installing python-telegram-bot..."
