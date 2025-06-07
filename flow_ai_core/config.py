@@ -125,3 +125,26 @@ except (ValueError, TypeError):
 # Log configuration summary
 logger.debug(f"Trading Symbol: {SYMBOL}, LTF: {TIMEFRAME}, HTFs: {HTF_TIMEFRAMES}")
 logger.info("Configuration loaded successfully.")
+
+# ===== ADVANCED AI CONFIGURATION =====
+AI_ADVANCED_FEATURES = get_env_var("AI_ADVANCED_FEATURES", True, var_type=bool)
+AI_TIME_BASED_FILTERING = get_env_var("AI_TIME_BASED_FILTERING", True, var_type=bool)
+AI_VOLATILITY_FILTERING = get_env_var("AI_VOLATILITY_FILTERING", True, var_type=bool)
+AI_VOLUME_CONFIRMATION = get_env_var("AI_VOLUME_CONFIRMATION", True, var_type=bool)
+
+# High Volatility Trading Hours (UTC)
+HIGH_VOLATILITY_HOURS = [(8, 10), (13, 15), (20, 22)]
+
+# Advanced Target Thresholds
+AI_STRONG_BUY_THRESHOLD = get_env_var("AI_STRONG_BUY_THRESHOLD", 0.008, var_type=float)
+AI_BUY_THRESHOLD = get_env_var("AI_BUY_THRESHOLD", 0.003, var_type=float)
+AI_HOLD_THRESHOLD = get_env_var("AI_HOLD_THRESHOLD", 0.002, var_type=float)
+AI_SELL_THRESHOLD = get_env_var("AI_SELL_THRESHOLD", -0.003, var_type=float)
+AI_STRONG_SELL_THRESHOLD = get_env_var("AI_STRONG_SELL_THRESHOLD", -0.008, var_type=float)
+
+# Volume and Volatility Filters
+MIN_VOLUME_MULTIPLIER = get_env_var("MIN_VOLUME_MULTIPLIER", 1.2, var_type=float)
+MIN_VOLATILITY_MULTIPLIER = get_env_var("MIN_VOLATILITY_MULTIPLIER", 1.1, var_type=float)
+
+# Model Metadata Path
+MODEL_METADATA_PATH = get_env_var("MODEL_METADATA_PATH", "model_metadata.pkl")

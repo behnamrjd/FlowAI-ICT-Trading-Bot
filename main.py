@@ -31,8 +31,8 @@ ai_model = None
 ai_features = None
 bot_running = True
 
-def load_ai_model():
-    """Load the trained AI model"""
+
+    """Load the trained AI model with metadata"""
     global ai_model, ai_features
     
     try:
@@ -40,60 +40,176 @@ def load_ai_model():
         ai_model = joblib.load(config.MODEL_PATH)
         logger.info(f"AI Model pipeline loaded: {type(ai_model)}")
         
-        # Load feature names
-        if os.path.exists(config.MODEL_FEATURES_PATH):
-            ai_features = joblib.load(config.MODEL_FEATURES_PATH)
-            logger.info(f"AI Model features loaded: {len(ai_features)} features")
-        else:
-            logger.warning("Model features file not found")
-            
+        # Load metadata
+        try:
+            metadata = joblib.load(config.MODEL_METADATA_PATH)
+            ai_features = metadata.get('feature_names', [])
+            logger.info(f"AI Model metadata loaded: {len(ai_features)} features")
+            logger.info(f"Training accuracy: {metadata.get('training_accuracy', 'N/A')}")
+            logger.info(f"Training date: {metadata.get('training_date', 'N/A')}")
+        except Exception as e:
+            logger.warning(f"Could not load model metadata: {e}")
+            # Fallback to old method
+            if os.path.exists(config.MODEL_FEATURES_PATH):
+                ai_features = joblib.load(config.MODEL_FEATURES_PATH)
+                logger.info(f"AI Model features loaded: {len(ai_features)} features")
+            else:
+                logger.warning("Model features file not found")
+                
     except Exception as e:
         logger.error(f"Failed to load AI model: {e}")
         ai_model = None
         ai_features = None
 
+
 def engineer_features(df):
-    """Create simple features for AI model"""
+    """Create advanced features for AI model - UPDATED VERSION"""
+    from datetime import datetime
+    
     features = pd.DataFrame(index=df.index)
     
-    # Basic price features
-    features["price_change"] = df["Close"].pct_change().fillna(0)
-    features["volatility"] = df["Close"].rolling(20).std().fillna(0)
-    features["high_low_ratio"] = (df["High"] / df["Low"]).fillna(1)
-    features["volume_norm"] = (df["Volume"] / df["Volume"].rolling(20).mean()).fillna(1)
+    # === BASIC PRICE FEATURES ===
+    features['price_change'] = df['Close'].pct_change().fillna(0)
+    features['high_low_ratio'] = (df['High'] / df['Low']).fillna(1)
+    features['close_position'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'])
+    features['close_position'] = features['close_position'].fillna(0.5)
     
-    # Simple moving averages
-    features["sma_5"] = df["Close"].rolling(5).mean().fillna(df["Close"])
-    features["sma_20"] = df["Close"].rolling(20).mean().fillna(df["Close"])
-    features["price_sma_ratio"] = (df["Close"] / features["sma_20"]).fillna(1)
+    # === VOLATILITY FEATURES ===
+    features['volatility_5'] = df['Close'].rolling(5).std().fillna(0)
+    features['volatility_20'] = df['Close'].rolling(20).std().fillna(0)
+    features['volatility_ratio'] = (features['volatility_5'] / features['volatility_20']).fillna(1)
     
-    # RSI calculation
-    delta = df["Close"].diff()
+    # ATR
+    high_low = df['High'] - df['Low']
+    high_close = np.abs(df['High'] - df['Close'].shift())
+    low_close = np.abs(df['Low'] - df['Close'].shift())
+    true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+    features['atr'] = true_range.rolling(14).mean().fillna(0)
+    features['atr_ratio'] = (true_range / features['atr']).fillna(1)
+    
+    # === VOLUME FEATURES ===
+    features['volume_sma'] = df['Volume'].rolling(20).mean().fillna(df['Volume'])
+    features['volume_ratio'] = (df['Volume'] / features['volume_sma']).fillna(1)
+    features['volume_volatility'] = df['Volume'].rolling(10).std().fillna(0)
+    features['pv_trend'] = (features['price_change'] * np.log1p(features['volume_ratio'])).fillna(0)
+    
+    # === TECHNICAL INDICATORS ===
+    features['sma_5'] = df['Close'].rolling(5).mean().fillna(df['Close'])
+    features['sma_20'] = df['Close'].rolling(20).mean().fillna(df['Close'])
+    features['sma_50'] = df['Close'].rolling(50).mean().fillna(df['Close'])
+    
+    features['price_sma5_ratio'] = (df['Close'] / features['sma_5']).fillna(1)
+    features['price_sma20_ratio'] = (df['Close'] / features['sma_20']).fillna(1)
+    features['sma_cross'] = (features['sma_5'] / features['sma_20']).fillna(1)
+    
+    # RSI
+    delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
-    features["rsi_simple"] = 100 - (100 / (1 + rs))
-    features["rsi_simple"] = features["rsi_simple"].fillna(50)
+    features['rsi'] = 100 - (100 / (1 + rs))
+    features['rsi'] = features['rsi'].fillna(50)
+    features['rsi_normalized'] = (features['rsi'] - 50) / 50
     
-    # Momentum features
-    features["momentum_5"] = df["Close"] / df["Close"].shift(5) - 1
-    features["momentum_10"] = df["Close"] / df["Close"].shift(10) - 1
+    # Bollinger Bands
+    bb_middle = df['Close'].rolling(20).mean()
+    bb_std_dev = df['Close'].rolling(20).std()
+    bb_upper = bb_middle + (bb_std_dev * 2)
+    bb_lower = bb_middle - (bb_std_dev * 2)
+    features['bb_position'] = (df['Close'] - bb_lower) / (bb_upper - bb_lower)
+    features['bb_position'] = features['bb_position'].fillna(0.5)
+    features['bb_width'] = ((bb_upper - bb_lower) / bb_middle).fillna(0)
     
-    return features.fillna(0)
+    # === MOMENTUM FEATURES ===
+    features['momentum_3'] = (df['Close'] / df['Close'].shift(3) - 1).fillna(0)
+    features['momentum_5'] = (df['Close'] / df['Close'].shift(5) - 1).fillna(0)
+    features['momentum_10'] = (df['Close'] / df['Close'].shift(10) - 1).fillna(0)
+    features['roc_5'] = ((df['Close'] - df['Close'].shift(5)) / df['Close'].shift(5) * 100).fillna(0)
+    
+    # === TIME-BASED FEATURES ===
+    features['hour'] = df.index.hour
+    features['day_of_week'] = df.index.dayofweek
+    
+    # High volatility time detection
+    high_vol_hours = [(8, 10), (13, 15), (20, 22)]
+    features['is_high_vol_time'] = 0
+    for start, end in high_vol_hours:
+        mask = (features['hour'] >= start) & (features['hour'] <= end)
+        features.loc[mask, 'is_high_vol_time'] = 1
+    
+    # Session indicators
+    features['london_session'] = ((features['hour'] >= 8) & (features['hour'] <= 16)).astype(int)
+    features['us_session'] = ((features['hour'] >= 13) & (features['hour'] <= 21)).astype(int)
+    features['asian_session'] = ((features['hour'] >= 20) | (features['hour'] <= 2)).astype(int)
+    
+    # === MARKET STRUCTURE FEATURES ===
+    features['recent_high'] = df['High'].rolling(20).max()
+    features['recent_low'] = df['Low'].rolling(20).min()
+    features['distance_to_high'] = (features['recent_high'] - df['Close']) / df['Close']
+    features['distance_to_low'] = (df['Close'] - features['recent_low']) / df['Close']
+    features['trend_strength'] = features['sma_cross'] - 1
+    
+    # === VOLATILITY REGIME ===
+    vol_ma = features['volatility_20'].rolling(50).mean()
+    features['vol_regime'] = (features['volatility_20'] > vol_ma).astype(int)
+    
+    # Fill NaN values
+    features = features.fillna(method='ffill').fillna(0)
+    
+    return features
+
 
 def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-    """Get AI model prediction"""
+    """Get advanced AI model prediction with filtering"""
     global ai_model, ai_features
     
     try:
         logger.info(f"Getting AI prediction. LTF data shape for FE: {processed_ltf_data.shape}")
         
-        # Engineer features
+        # Engineer advanced features
         X_live_features = engineer_features(processed_ltf_data.copy())
         
         if X_live_features.empty:
             logger.error("No features generated for AI prediction")
             return None
+        
+        # Get current market conditions
+        current_time = processed_ltf_data.index[-1]
+        current_hour = current_time.hour
+        current_volume = processed_ltf_data['Volume'].iloc[-1]
+        volume_ma = processed_ltf_data['Volume'].rolling(20).mean().iloc[-1]
+        current_volatility = X_live_features['volatility_20'].iloc[-1]
+        volatility_ma = X_live_features['volatility_20'].rolling(50).mean().iloc[-1]
+        
+        # === TIME-BASED FILTERING ===
+        high_vol_hours = [(8, 10), (13, 15), (20, 22)]
+        is_high_vol_time = any(start <= current_hour <= end for start, end in high_vol_hours)
+        
+        if not is_high_vol_time:
+            logger.info(f"Outside high volatility hours (current: {current_hour}). Skipping prediction.")
+            return {
+                'prediction': 2,  # HOLD
+                'label': 'HOLD',
+                'probabilities': [0.1, 0.1, 0.8, 0.0, 0.0],
+                'confidence': 0.8,
+                'reason': 'Outside trading hours'
+            }
+        
+        # === VOLUME FILTERING ===
+        volume_ratio = current_volume / volume_ma if volume_ma > 0 else 1
+        if volume_ratio < config.MIN_VOLUME_MULTIPLIER:
+            logger.info(f"Low volume detected ({volume_ratio:.2f}x). Reducing signal strength.")
+            volume_penalty = 0.7
+        else:
+            volume_penalty = 1.0
+        
+        # === VOLATILITY FILTERING ===
+        volatility_ratio = current_volatility / volatility_ma if volatility_ma > 0 else 1
+        if volatility_ratio < config.MIN_VOLATILITY_MULTIPLIER:
+            logger.info(f"Low volatility detected ({volatility_ratio:.2f}x). Reducing signal strength.")
+            volatility_penalty = 0.8
+        else:
+            volatility_penalty = 1.0
         
         # Use the last row for prediction
         X_latest = X_live_features.iloc[-1:].values
@@ -106,17 +222,27 @@ def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, An
         prediction = ai_model.predict(X_latest)[0]
         probabilities = ai_model.predict_proba(X_latest)[0]
         
-        # Map prediction to label
-        label_map = {0: 'HOLD', 1: 'BUY', 2: 'SELL'}
-        predicted_label = label_map.get(prediction, 'HOLD')
+        # Load metadata for label mapping
+        try:
+            metadata = joblib.load(config.MODEL_METADATA_PATH)
+            target_names = metadata.get('target_names', ['STRONG_SELL', 'SELL', 'HOLD', 'BUY', 'STRONG_BUY'])
+        except:
+            target_names = ['STRONG_SELL', 'SELL', 'HOLD', 'BUY', 'STRONG_BUY']
         
-        logger.info(f"AI raw: {prediction}, Label: {predicted_label}, Proba: {probabilities}")
+        predicted_label = target_names[prediction] if prediction < len(target_names) else 'HOLD'
+        confidence = max(probabilities) * volume_penalty * volatility_penalty
+        
+        logger.info(f"AI raw: {prediction}, Label: {predicted_label}, Confidence: {confidence:.3f}")
+        logger.info(f"Market conditions - Volume: {volume_ratio:.2f}x, Volatility: {volatility_ratio:.2f}x")
         
         return {
             'prediction': prediction,
             'label': predicted_label,
-            'probabilities': probabilities,
-            'confidence': max(probabilities)
+            'probabilities': probabilities.tolist(),
+            'confidence': confidence,
+            'volume_ratio': volume_ratio,
+            'volatility_ratio': volatility_ratio,
+            'is_high_vol_time': is_high_vol_time
         }
         
     except Exception as e:
