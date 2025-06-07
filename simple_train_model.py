@@ -34,137 +34,126 @@ class AdvancedFeatureEngineer:
             (20, 22),  # Asian Session
         ]
         
-def create_advanced_features(self, df):
-    """Create professional trading features with infinity handling"""
-    features = pd.DataFrame(index=df.index)
-    
-    # === BASIC PRICE FEATURES ===
-    features['price_change'] = df['Close'].pct_change().fillna(0)
-    features['high_low_ratio'] = (df['High'] / df['Low']).fillna(1)
-    features['close_position'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'])
-    features['close_position'] = features['close_position'].fillna(0.5)
-    
-    # === VOLATILITY FEATURES ===
-    features['volatility_5'] = df['Close'].rolling(5).std().fillna(0)
-    features['volatility_20'] = df['Close'].rolling(20).std().fillna(0)
-    features['volatility_ratio'] = (features['volatility_5'] / features['volatility_20']).fillna(1)
-    
-    # ATR (Average True Range) - با مدیریت infinity
-    high_low = df['High'] - df['Low']
-    high_close = np.abs(df['High'] - df['Close'].shift())
-    low_close = np.abs(df['Low'] - df['Close'].shift())
-    true_range = np.maximum(high_low, np.maximum(high_close, low_close))
-    features['atr'] = true_range.rolling(14).mean().fillna(0)
-    
-    # Safe division for ATR ratio
-    atr_values = features['atr'].values
-    atr_ratio = np.where(atr_values != 0, true_range / atr_values, 1.0)
-    features['atr_ratio'] = pd.Series(atr_ratio, index=df.index).fillna(1)
-    
-    # === VOLUME FEATURES ===
-    features['volume_sma'] = df['Volume'].rolling(20).mean().fillna(df['Volume'])
-    
-    # Safe division for volume ratio
-    volume_sma_values = features['volume_sma'].values
-    volume_ratio = np.where(volume_sma_values != 0, df['Volume'] / volume_sma_values, 1.0)
-    features['volume_ratio'] = pd.Series(volume_ratio, index=df.index).fillna(1)
-    
-    features['volume_volatility'] = df['Volume'].rolling(10).std().fillna(0)
-    
-    # Price-Volume Relationship - safe log
-    log_volume_ratio = np.log1p(np.abs(features['volume_ratio']))
-    features['pv_trend'] = (features['price_change'] * log_volume_ratio).fillna(0)
-    
-    # === TECHNICAL INDICATORS ===
-    # Moving Averages
-    features['sma_5'] = df['Close'].rolling(5).mean().fillna(df['Close'])
-    features['sma_20'] = df['Close'].rolling(20).mean().fillna(df['Close'])
-    features['sma_50'] = df['Close'].rolling(50).mean().fillna(df['Close'])
-    
-    # Safe ratios
-    sma5_values = features['sma_5'].values
-    sma20_values = features['sma_20'].values
-    
-    features['price_sma5_ratio'] = np.where(sma5_values != 0, df['Close'] / sma5_values, 1.0)
-    features['price_sma20_ratio'] = np.where(sma20_values != 0, df['Close'] / sma20_values, 1.0)
-    features['sma_cross'] = np.where(sma20_values != 0, sma5_values / sma20_values, 1.0)
-    
-    # RSI
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    
-    # Safe RSI calculation
-    rs = np.where(loss != 0, gain / loss, 0)
-    features['rsi'] = 100 - (100 / (1 + rs))
-    features['rsi'] = pd.Series(features['rsi'], index=df.index).fillna(50)
-    features['rsi_normalized'] = (features['rsi'] - 50) / 50
-    
-    # Bollinger Bands
-    bb_period = 20
-    bb_std = 2
-    bb_middle = df['Close'].rolling(bb_period).mean()
-    bb_std_dev = df['Close'].rolling(bb_period).std()
-    bb_upper = bb_middle + (bb_std_dev * bb_std)
-    bb_lower = bb_middle - (bb_std_dev * bb_std)
-    
-    # Safe BB position calculation
-    bb_range = bb_upper - bb_lower
-    features['bb_position'] = np.where(bb_range != 0, (df['Close'] - bb_lower) / bb_range, 0.5)
-    features['bb_width'] = np.where(bb_middle != 0, bb_range / bb_middle, 0)
-    
-    # === MOMENTUM FEATURES ===
-    features['momentum_3'] = (df['Close'] / df['Close'].shift(3) - 1).fillna(0)
-    features['momentum_5'] = (df['Close'] / df['Close'].shift(5) - 1).fillna(0)
-    features['momentum_10'] = (df['Close'] / df['Close'].shift(10) - 1).fillna(0)
-    
-    # Rate of Change - safe calculation
-    close_shifted = df['Close'].shift(5)
-    features['roc_5'] = np.where(close_shifted != 0, 
-                                (df['Close'] - close_shifted) / close_shifted * 100, 0)
-    
-    # === TIME-BASED FEATURES ===
-    features['hour'] = df.index.hour
-    features['day_of_week'] = df.index.dayofweek
-    features['is_high_vol_time'] = features['hour'].apply(self._is_high_volatility_time)
-    
-    # Session indicators
-    features['london_session'] = ((features['hour'] >= 8) & (features['hour'] <= 16)).astype(int)
-    features['us_session'] = ((features['hour'] >= 13) & (features['hour'] <= 21)).astype(int)
-    features['asian_session'] = ((features['hour'] >= 20) | (features['hour'] <= 2)).astype(int)
-    
-    # === MARKET STRUCTURE FEATURES ===
-    features['recent_high'] = df['High'].rolling(20).max()
-    features['recent_low'] = df['Low'].rolling(20).min()
-    
-    # Safe distance calculations
-    close_values = df['Close'].values
-    features['distance_to_high'] = np.where(close_values != 0, 
-                                          (features['recent_high'] - close_values) / close_values, 0)
-    features['distance_to_low'] = np.where(close_values != 0,
-                                         (close_values - features['recent_low']) / close_values, 0)
-    
-    features['trend_strength'] = features['sma_cross'] - 1
-    
-    # === VOLATILITY REGIME ===
-    vol_ma = features['volatility_20'].rolling(50).mean()
-    features['vol_regime'] = (features['volatility_20'] > vol_ma).astype(int)
-    
-    # === FINAL CLEANING ===
-    # Replace any remaining infinity values
-    features = features.replace([np.inf, -np.inf], np.nan)
-    
-    # Fill NaN values
-    features = features.fillna(method='ffill').fillna(0)
-    
-    # Clip extreme values to prevent overflow
-    numeric_columns = features.select_dtypes(include=[np.number]).columns
-    for col in numeric_columns:
-        features[col] = np.clip(features[col], -1e6, 1e6)
-    
-    logger.info(f"Created {len(features.columns)} advanced features")
-    return features
-
+    def create_advanced_features(self, df):
+        """Create professional trading features with infinity handling"""
+        features = pd.DataFrame(index=df.index)
+        
+        # === BASIC PRICE FEATURES ===
+        features['price_change'] = df['Close'].pct_change().fillna(0)
+        features['high_low_ratio'] = (df['High'] / df['Low']).fillna(1)
+        features['close_position'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'])
+        features['close_position'] = features['close_position'].fillna(0.5)
+        
+        # === VOLATILITY FEATURES ===
+        features['volatility_5'] = df['Close'].rolling(5).std().fillna(0)
+        features['volatility_20'] = df['Close'].rolling(20).std().fillna(0)
+        features['volatility_ratio'] = (features['volatility_5'] / features['volatility_20']).fillna(1)
+        
+        # ATR with safe division
+        high_low = df['High'] - df['Low']
+        high_close = np.abs(df['High'] - df['Close'].shift())
+        low_close = np.abs(df['Low'] - df['Close'].shift())
+        true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+        features['atr'] = true_range.rolling(14).mean().fillna(0)
+        
+        # Safe ATR ratio
+        atr_values = features['atr'].values
+        atr_ratio = np.where(atr_values != 0, true_range / atr_values, 1.0)
+        features['atr_ratio'] = pd.Series(atr_ratio, index=df.index).fillna(1)
+        
+        # === VOLUME FEATURES ===
+        features['volume_sma'] = df['Volume'].rolling(20).mean().fillna(df['Volume'])
+        
+        # Safe volume ratio
+        volume_sma_values = features['volume_sma'].values
+        volume_ratio = np.where(volume_sma_values != 0, df['Volume'] / volume_sma_values, 1.0)
+        features['volume_ratio'] = pd.Series(volume_ratio, index=df.index).fillna(1)
+        
+        features['volume_volatility'] = df['Volume'].rolling(10).std().fillna(0)
+        features['pv_trend'] = (features['price_change'] * np.log1p(features['volume_ratio'])).fillna(0)
+        
+        # === TECHNICAL INDICATORS ===
+        features['sma_5'] = df['Close'].rolling(5).mean().fillna(df['Close'])
+        features['sma_20'] = df['Close'].rolling(20).mean().fillna(df['Close'])
+        features['sma_50'] = df['Close'].rolling(50).mean().fillna(df['Close'])
+        
+        # Safe ratios
+        sma5_values = features['sma_5'].values
+        sma20_values = features['sma_20'].values
+        
+        features['price_sma5_ratio'] = np.where(sma5_values != 0, df['Close'] / sma5_values, 1.0)
+        features['price_sma20_ratio'] = np.where(sma20_values != 0, df['Close'] / sma20_values, 1.0)
+        features['sma_cross'] = np.where(sma20_values != 0, sma5_values / sma20_values, 1.0)
+        
+        # RSI with safe calculation
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        
+        rs = np.where(loss != 0, gain / loss, 0)
+        features['rsi'] = 100 - (100 / (1 + rs))
+        features['rsi'] = pd.Series(features['rsi'], index=df.index).fillna(50)
+        features['rsi_normalized'] = (features['rsi'] - 50) / 50
+        
+        # Bollinger Bands
+        bb_middle = df['Close'].rolling(20).mean()
+        bb_std_dev = df['Close'].rolling(20).std()
+        bb_upper = bb_middle + (bb_std_dev * 2)
+        bb_lower = bb_middle - (bb_std_dev * 2)
+        
+        bb_range = bb_upper - bb_lower
+        features['bb_position'] = np.where(bb_range != 0, (df['Close'] - bb_lower) / bb_range, 0.5)
+        features['bb_width'] = np.where(bb_middle != 0, bb_range / bb_middle, 0)
+        
+        # === MOMENTUM FEATURES ===
+        features['momentum_3'] = (df['Close'] / df['Close'].shift(3) - 1).fillna(0)
+        features['momentum_5'] = (df['Close'] / df['Close'].shift(5) - 1).fillna(0)
+        features['momentum_10'] = (df['Close'] / df['Close'].shift(10) - 1).fillna(0)
+        
+        close_shifted = df['Close'].shift(5)
+        features['roc_5'] = np.where(close_shifted != 0, 
+                                    (df['Close'] - close_shifted) / close_shifted * 100, 0)
+        
+        # === TIME-BASED FEATURES ===
+        features['hour'] = df.index.hour
+        features['day_of_week'] = df.index.dayofweek
+        features['is_high_vol_time'] = features['hour'].apply(self._is_high_volatility_time)
+        
+        # Session indicators
+        features['london_session'] = ((features['hour'] >= 8) & (features['hour'] <= 16)).astype(int)
+        features['us_session'] = ((features['hour'] >= 13) & (features['hour'] <= 21)).astype(int)
+        features['asian_session'] = ((features['hour'] >= 20) | (features['hour'] <= 2)).astype(int)
+        
+        # === MARKET STRUCTURE FEATURES ===
+        features['recent_high'] = df['High'].rolling(20).max()
+        features['recent_low'] = df['Low'].rolling(20).min()
+        
+        close_values = df['Close'].values
+        features['distance_to_high'] = np.where(close_values != 0, 
+                                              (features['recent_high'] - close_values) / close_values, 0)
+        features['distance_to_low'] = np.where(close_values != 0,
+                                             (close_values - features['recent_low']) / close_values, 0)
+        
+        features['trend_strength'] = features['sma_cross'] - 1
+        
+        # === VOLATILITY REGIME ===
+        vol_ma = features['volatility_20'].rolling(50).mean()
+        features['vol_regime'] = (features['volatility_20'] > vol_ma).astype(int)
+        
+        # === FINAL CLEANING ===
+        # Replace infinity values
+        features = features.replace([np.inf, -np.inf], np.nan)
+        
+        # Fill NaN values
+        features = features.fillna(method='ffill').fillna(0)
+        
+        # Clip extreme values
+        numeric_columns = features.select_dtypes(include=[np.number]).columns
+        for col in numeric_columns:
+            features[col] = np.clip(features[col], -1e6, 1e6)
+        
+        logger.info(f"Created {len(features.columns)} advanced features")
+        return features
     
     def _is_high_volatility_time(self, hour):
         """Check if hour is in high volatility periods"""
