@@ -17,7 +17,7 @@ CONDA_ENV_NAME="flowai_env"
 PYTHON_VERSION="3.12"
 TARGET_USER="flowaibot"
 USER_HOME="/home/$TARGET_USER"
-MINICONDA_PATH="$USER_HOME/miniconda3"
+VENV_PATH="$USER_HOME/flowai_venv"
 PROJECT_DIR="/opt/FlowAI-ICT-Trading-Bot"
 PROJECT_REPO="https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot.git"
 
@@ -104,7 +104,7 @@ check_installation() {
         return
     fi
     
-    if [ ! -d "$MINICONDA_PATH" ] || [ ! -f "$MINICONDA_PATH/bin/conda" ]; then
+    if [ ! -d "$VENV_PATH" ] || [ ! -f "$VENV_PATH/bin/python" ]; then
         is_installed=false
         echo "$is_installed"
         return
@@ -115,9 +115,7 @@ check_installation() {
         export USER='$TARGET_USER'
         unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
         cd '$USER_HOME'
-        source '$MINICONDA_PATH/etc/profile.d/conda.sh' 2>/dev/null &&
-        conda env list | grep -q '$CONDA_ENV_NAME' &&
-        conda activate '$CONDA_ENV_NAME' &&
+        source '$VENV_PATH/bin/activate' &&
         command -v python >/dev/null 2>&1 &&
         python --version >/dev/null 2>&1
     " 2>/dev/null; then
@@ -134,6 +132,7 @@ check_installation() {
     
     echo "$is_installed"
 }
+
 
 # --- Function: Fix Permissions ---
 fix_permissions() {
@@ -188,33 +187,18 @@ fix_project_permissions() {
 install_build_dependencies() {
     log_info "Installing build dependencies..."
     
-    # Update package list
     apt-get update -qq
-    
-    # Install essential build tools + TA-Lib system package
     apt-get install -y build-essential gcc g++ make cmake wget tar autoconf automake libtool pkg-config git
+    apt-get install -y python3 python3-pip python3-venv python3-dev
     
-    # Install TA-Lib system package (critical for avoiding compilation issues)
-    # Remove libta-lib packages (not available in Ubuntu repos)
-# TA-Lib will be installed from source in install_python_packages()
-    
-    # Install Python development headers
     PYTHON_MAJMIN=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     apt-get install -y python${PYTHON_MAJMIN}-dev
     
-    # Verify critical installations
     if command -v gcc >/dev/null 2>&1; then
         log_success "GCC installed: $(gcc --version | head -1)"
     else
         log_error "GCC installation failed"
         return 1
-    fi
-    
-    # Verify TA-Lib C library
-    if ldconfig -p | grep -q libta_lib; then
-        log_success "TA-Lib C library installed and available"
-    else
-        log_warning "TA-Lib C library not found in ldconfig, will install manually"
     fi
     
     log_success "Build dependencies installed"
@@ -970,7 +954,6 @@ update_packages() {
         return 1
     fi
     
-    install_build_dependencies
     fix_permissions
     
     EXEC_DIR=$(create_exec_dir)
@@ -984,35 +967,29 @@ unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
 cd "$HOME"
 
-source "$MINICONDA_PATH/etc/profile.d/conda.sh"
-conda activate "$CONDA_ENV_NAME"
+source "$VENV_PATH/bin/activate"
 
 if ! command -v python >/dev/null 2>&1; then
-    echo "⚠️ Python not found. Installing..."
-    conda install python=$PYTHON_VERSION -y
+    echo "⚠️ Python not found in virtual environment"
+    exit 1
 fi
 
 echo "📦 Updating pip..."
 python -m pip install --upgrade pip
 
-echo "📦 Updating conda packages..."
-conda update --all -y
-
-echo "📦 Installing build tools..."
-conda install -c anaconda gcc_linux-64 gxx_linux-64 -y || echo "⚠️ Could not install conda build tools"
+echo "📦 Updating packages..."
+pip install --upgrade numpy pandas matplotlib seaborn requests python-telegram-bot scikit-learn
 
 if [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo "📦 Updating project requirements..."
     pip install --upgrade -r "$PROJECT_DIR/requirements.txt" || echo "⚠️ Some requirements failed"
 else
     echo "📦 Updating common packages..."
-    pip install --upgrade numpy pandas matplotlib seaborn requests python-telegram-bot scikit-learn
+    pip install --upgrade python-binance lightgbm tensorflow apscheduler click tqdm
 fi
 
-echo "📦 Checking TA-Lib..."
-# Skip TA-Lib update to avoid breaking working installation
-echo "⚠️ Skipping TA-Lib update to maintain stability"
-echo "✅ Existing TA-Lib installation should continue working"
+echo "📦 Checking TA library..."
+echo "✅ TA library (ta==0.10.2) should remain stable"
 
 echo "✅ Package update completed!"
 
@@ -1020,27 +997,19 @@ echo ""
 echo "📋 Updated package versions:"
 python -c "
 import sys
-packages = ['numpy', 'pandas', 'requests']
+packages = ['numpy', 'pandas', 'requests', 'ta']
 for pkg in packages:
     try:
         module = __import__(pkg)
         print(f'  {pkg}: {getattr(module, \"__version__\", \"unknown\")}')
     except ImportError:
         print(f'  {pkg}: not installed')
-
-try:
-    import talib
-    print(f'  talib: {talib.__version__}')
-except ImportError:
-    print('  talib: not available')
 "
 EOF
 
     sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/update_packages_fixed.sh"
     sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/update_packages_fixed.sh"
-    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/update_packages_fixed.sh"
-    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/update_packages_fixed.sh"
-    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$VENV_PATH|$VENV_PATH|g" "$EXEC_DIR/update_packages_fixed.sh"
     sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/update_packages_fixed.sh"
 
     chmod +x "$EXEC_DIR/update_packages_fixed.sh"
@@ -1368,6 +1337,58 @@ ensure_user_exists() {
     fix_project_permissions
 }
 
+setup_python_environment() {
+    log_info "Setting up Python virtual environment..."
+    
+    EXEC_DIR=$(create_exec_dir)
+    
+    cat > "$EXEC_DIR/setup_venv.sh" << 'EOF'
+#!/bin/bash
+set -e
+
+USER_HOME="$USER_HOME"
+VENV_PATH="$VENV_PATH"
+PYTHON_VERSION="$PYTHON_VERSION"
+
+export HOME="$USER_HOME"
+export USER="$TARGET_USER"
+unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+
+cd "$USER_HOME"
+
+if [ -d "$VENV_PATH" ]; then
+    echo "Removing existing virtual environment..."
+    rm -rf "$VENV_PATH"
+fi
+
+echo "Creating Python virtual environment: $VENV_PATH"
+python3 -m venv "$VENV_PATH"
+
+source "$VENV_PATH/bin/activate"
+
+echo "Python version in environment:"
+python --version
+echo "Python executable: $(which python)"
+
+echo "Virtual environment setup completed"
+EOF
+
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/setup_venv.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/setup_venv.sh"
+    sed -i "s|\$VENV_PATH|$VENV_PATH|g" "$EXEC_DIR/setup_venv.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/setup_venv.sh"
+
+    chmod +x "$EXEC_DIR/setup_venv.sh"
+    
+    if [ "$EUID" -eq 0 ]; then
+        sudo -u "$TARGET_USER" -H "$EXEC_DIR/setup_venv.sh"
+    else
+        "$EXEC_DIR/setup_venv.sh"
+    fi
+    
+    rm "$EXEC_DIR/setup_venv.sh"
+    log_success "Python virtual environment created successfully"
+}
 
 
 
@@ -1381,8 +1402,7 @@ install_python_packages() {
 set -e
 
 USER_HOME="$USER_HOME"
-MINICONDA_PATH="$MINICONDA_PATH"
-CONDA_ENV_NAME="$CONDA_ENV_NAME"
+VENV_PATH="$VENV_PATH"
 PROJECT_DIR="$PROJECT_DIR"
 
 export HOME="$USER_HOME"
@@ -1391,12 +1411,11 @@ unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
 cd "$USER_HOME"
 
-source "$MINICONDA_PATH/etc/profile.d/conda.sh"
-conda activate "$CONDA_ENV_NAME"
+source "$VENV_PATH/bin/activate"
 
 if ! command -v python >/dev/null 2>&1; then
-    echo "Installing Python..."
-    conda install python=$PYTHON_VERSION -y
+    echo "ERROR: Python not found in virtual environment"
+    exit 1
 fi
 
 echo "Upgrading pip..."
@@ -1414,59 +1433,15 @@ pip install python-binance apscheduler click tqdm pyarrow
 echo "Installing utility packages..."
 pip install numba
 
-echo "Installing TA-Lib C library from source..."
-cd /tmp
-
-# Clean any previous attempts
-rm -rf ta-lib ta-lib-0.6.4-src.tar.gz
-
-# Download latest version
-wget -q https://downloads.sourceforge.net/project/ta-lib/ta-lib/0.6.4/ta-lib-0.6.4-src.tar.gz
-tar -xzf ta-lib-0.6.4-src.tar.gz
-cd ta-lib-0.6.4/
-
-# Configure and install
-./configure --prefix=/usr
-make
-sudo make install
-
-# Update library cache
-sudo ldconfig
-
-# Verify installation
-if ldconfig -p | grep -q libta_lib; then
-    echo "✅ TA-Lib C library installed successfully"
-else
-    echo "❌ TA-Lib C library installation failed"
-    exit 1
-fi
-
-# Return to user directory
-cd "$USER_HOME"
-
-# Set environment variables
-export TA_LIBRARY_PATH="/usr/lib"
-export TA_INCLUDE_PATH="/usr/include"
-export CFLAGS="-I/usr/include"
-export LDFLAGS="-L/usr/lib"
-
-# Install Python wrapper
-if pip install TA-Lib --no-cache-dir; then
-    echo "✅ TA-Lib Python wrapper installed successfully"
-else
-    echo "❌ TA-Lib installation failed completely"
-fi
-
-# Clean up
-rm -rf /tmp/ta-lib-0.6.4 /tmp/ta-lib-0.6.4-src.tar.gz
+echo "Installing TA library (ta==0.10.2)..."
+pip install ta==0.10.2
 
 echo "Installing python-telegram-bot..."
 pip install python-telegram-bot
 
 if [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo "Installing from requirements.txt..."
-    # Install requirements with specific handling for problematic packages
-    pip install -r "$PROJECT_DIR/requirements.txt" --no-deps || {
+    pip install -r "$PROJECT_DIR/requirements.txt" || {
         echo "⚠️ Some requirements failed, installing individually..."
         while IFS= read -r requirement; do
             if [[ ! "$requirement" =~ ^#.* ]] && [[ -n "$requirement" ]]; then
@@ -1475,8 +1450,7 @@ if [ -f "$PROJECT_DIR/requirements.txt" ]; then
         done < "$PROJECT_DIR/requirements.txt"
     }
 else
-    echo "⚠️ requirements.txt not found, installing common trading packages..."
-    pip install python-binance lightgbm tensorflow apscheduler click tqdm
+    echo "⚠️ requirements.txt not found, using default packages..."
 fi
 
 echo "Verifying installations..."
@@ -1485,7 +1459,7 @@ import sys
 print('Python executable:', sys.executable)
 print('Python version:', sys.version)
 
-packages = ['numpy', 'pandas', 'requests', 'sklearn']
+packages = ['numpy', 'pandas', 'requests', 'sklearn', 'ta']
 for pkg in packages:
     try:
         module = __import__(pkg)
@@ -1493,20 +1467,25 @@ for pkg in packages:
     except ImportError:
         print(f'✗ {pkg}: not installed')
 
-# Test TA-Lib specifically
+# Test TA library specifically
 try:
-    import talib
-    print(f'✅ TA-Lib: {talib.__version__}')
-    
-    # Test a simple function
+    import ta
+    import pandas as pd
     import numpy as np
-    test_data = np.random.random(100)
-    sma = talib.SMA(test_data, timeperiod=10)
-    print('✅ TA-Lib functionality test passed')
+    
+    print(f'✅ TA library: {ta.__version__}')
+    
+    # Test functionality
+    data = pd.DataFrame({
+        'close': np.random.random(100) * 100 + 50
+    })
+    
+    sma = ta.trend.sma_indicator(data['close'], window=10)
+    print('✅ TA library functionality test passed')
 except ImportError as e:
-    print(f'⚠️ TA-Lib not available: {e}')
+    print(f'⚠️ TA library not available: {e}')
 except Exception as e:
-    print(f'⚠️ TA-Lib test failed: {e}')
+    print(f'⚠️ TA library test failed: {e}')
 
 print('✓ Package verification completed')
 "
@@ -1516,9 +1495,7 @@ EOF
 
     sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/install_packages.sh"
     sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/install_packages.sh"
-    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/install_packages.sh"
-    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/install_packages.sh"
-    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/install_packages.sh"
+    sed -i "s|\$VENV_PATH|$VENV_PATH|g" "$EXEC_DIR/install_packages.sh"
     sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/install_packages.sh"
 
     chmod +x "$EXEC_DIR/install_packages.sh"
@@ -1534,12 +1511,13 @@ EOF
 }
 
 
+
 create_activation_script() {
     log_info "Creating activation script..."
     
     cat > "$USER_HOME/activate_flowai.sh" << 'EOF'
 #!/bin/bash
-# FlowAI Environment Activation Script - Fixed Version
+# FlowAI Environment Activation Script - Virtual Environment Version
 
 export HOME="$USER_HOME"
 export USER="$TARGET_USER"
@@ -1553,26 +1531,19 @@ unset SUDO_COMMAND
 
 cd "$HOME"
 
-if [ -f "$MINICONDA_PATH/etc/profile.d/conda.sh" ]; then
-    source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+if [ -f "$VENV_PATH/bin/activate" ]; then
+    source "$VENV_PATH/bin/activate"
 else
-    echo "❌ Conda not found!"
+    echo "❌ Virtual environment not found!"
     exit 1
 fi
 
-if conda env list | grep -q "$CONDA_ENV_NAME"; then
-    conda activate "$CONDA_ENV_NAME"
-    
-    if command -v python >/dev/null 2>&1; then
-        echo "✅ FlowAI environment activated!"
-        echo "Python version: $(python --version)"
-        echo "Environment: $CONDA_DEFAULT_ENV"
-    else
-        echo "⚠️ Installing Python..."
-        conda install python=$PYTHON_VERSION -y
-    fi
+if command -v python >/dev/null 2>&1; then
+    echo "✅ FlowAI environment activated!"
+    echo "Python version: $(python --version)"
+    echo "Python executable: $(which python)"
 else
-    echo "❌ Environment not found!"
+    echo "❌ Python not found in virtual environment!"
     exit 1
 fi
 
@@ -1586,9 +1557,7 @@ EOF
 
     sed -i "s|\$USER_HOME|$USER_HOME|g" "$USER_HOME/activate_flowai.sh"
     sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$USER_HOME/activate_flowai.sh"
-    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$USER_HOME/activate_flowai.sh"
-    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$USER_HOME/activate_flowai.sh"
-    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$USER_HOME/activate_flowai.sh"
+    sed -i "s|\$VENV_PATH|$VENV_PATH|g" "$USER_HOME/activate_flowai.sh"
     sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$USER_HOME/activate_flowai.sh"
 
     chmod +x "$USER_HOME/activate_flowai.sh"
@@ -1599,6 +1568,7 @@ EOF
     
     log_success "Activation script created at $USER_HOME/activate_flowai.sh"
 }
+
 
 final_verification() {
     log_info "Performing final verification..."
@@ -1682,8 +1652,7 @@ perform_installation() {
     install_build_dependencies
     complete_system_cleanup
     ensure_user_exists
-    install_miniconda_as_user
-    setup_conda_environment
+    setup_python_environment
     install_python_packages
     create_activation_script
     fix_project_permissions
@@ -1693,18 +1662,19 @@ perform_installation() {
     log_info ""
     log_info "🎉 Installation Summary:"
     log_info "   ✓ User: $TARGET_USER"
-    log_info "   ✓ Conda environment: $CONDA_ENV_NAME"
+    log_info "   ✓ Virtual environment: $VENV_PATH"
     log_info "   ✓ Python version: $PYTHON_VERSION"
-    log_info "   ✓ Miniconda path: $MINICONDA_PATH"
+    log_info "   ✓ TA library: ta==0.10.2"
     log_info "   ✓ Build tools: GCC, Make, CMake installed"
     log_info ""
     log_info "🚀 To activate the environment:"
     log_info "   Method 1: source $USER_HOME/activate_flowai.sh"
-    log_info "   Method 2: su - $TARGET_USER && conda activate $CONDA_ENV_NAME"
+    log_info "   Method 2: su - $TARGET_USER && source $VENV_PATH/bin/activate"
     log_info ""
     log_info "📁 Project directory: $PROJECT_DIR"
     log_info ""
 }
+
 
 # --- Main Function ---
 main() {
