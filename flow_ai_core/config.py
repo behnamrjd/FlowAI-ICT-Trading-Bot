@@ -30,7 +30,14 @@ def get_env_var(key: str, default: Any = None, var_type: type = str) -> Any:
     
     try:
         if var_type == bool:
-            return value.lower() in ('true', '1', 'yes', 'on')
+            # اگر مقدار از قبل bool است
+            if isinstance(value, bool):
+                return value
+            # اگر string است
+            if isinstance(value, str):
+                return value.lower() in ('true', '1', 'yes', 'on')
+            # سایر انواع
+            return bool(value)
         elif var_type == int:
             return int(value)
         elif var_type == float:
