@@ -200,7 +200,7 @@ async def run_trading_logic():
 
             if should_send_signal_final:
                 final_message = "\n".join(message_parts)
-                await telegram_bot.send_telegram_message(config.TELEGRAM_TOKEN, config.TELEGRAM_CHAT_ID, final_message)
+                await telegram_bot.send_telegram_message(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID, final_message)
                 active_trade_signal_sent = True
                 utils.logger.info(f"Sent combined signal message for {signal.get('type')}")
             else:
@@ -215,7 +215,7 @@ async def run_trading_logic():
         utils.logger.error(f"Unhandled error in trading logic cycle: {e}", exc_info=True)
         try:
             await telegram_bot.send_telegram_message(
-                config.TELEGRAM_TOKEN, 
+                config.TELEGRAM_BOT_TOKEN, 
                 config.TELEGRAM_CHAT_ID, 
                 f"⚠️ *Bot Error in {config.SYMBOL} Cycle* ⚠️\n`{str(e)}`\nCheck logs for details."
             )
