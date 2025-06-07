@@ -184,6 +184,48 @@ fix_permissions() {
     log_success "Permissions fixed"
 }
 
+# --- Function: Fix Project Directory Permissions ---
+fix_project_permissions() {
+    log_info "Fixing project directory permissions..."
+    
+    # Check if project directory exists
+    if [ -d "$PROJECT_DIR" ]; then
+        # Fix ownership and permissions
+        chown -R "$TARGET_USER:$TARGET_USER" "$PROJECT_DIR"
+        chmod -R 755 "$PROJECT_DIR"
+        
+        # Ensure .env file is writable
+        if [ -f "$PROJECT_DIR/.env" ]; then
+            chown "$TARGET_USER:$TARGET_USER" "$PROJECT_DIR/.env"
+            chmod 644 "$PROJECT_DIR/.env"
+        fi
+        
+        log_success "Project directory permissions fixed"
+    else
+        log_info "Project directory not found, will be created with correct permissions"
+    fi
+}
+
+# --- Function: Install Build Dependencies ---
+install_build_dependencies() {
+    log_info "Installing build dependencies..."
+    
+    # Update package list
+    apt-get update -qq
+    
+    # Install essential build tools
+    apt-get install -y build-essential gcc g++ make cmake
+    
+    # Install Python development headers
+    PYTHON_MAJMIN=$($PYTHON_EXECUTABLE -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    apt-get install -y python${PYTHON_MAJMIN}-dev
+    
+    # Install additional dependencies for TA-Lib
+    apt-get install -y wget tar autoconf automake libtool pkg-config
+    
+    log_success "Build dependencies installed"
+}
+
 # --- Function: Activate Environment (Fixed) ---
 activate_environment() {
     log_info "Activating FlowAI environment..."
@@ -281,6 +323,550 @@ EOF
     sudo -u "$TARGET_USER" -H "$EXEC_DIR/activate_env_fixed.sh"
     
     rm -f "$EXEC_DIR/activate_env_fixed.sh"
+}
+
+# --- Function: Run Trading Bot (Fixed) ---
+run_trading_bot() {
+    log_info "Starting FlowAI Trading Bot..."
+    
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 9 (Repair Installation) first."
+        return 1
+    fi
+    
+    # Fix permissions first
+    fix_permissions
+    
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
+    cat > "$EXEC_DIR/run_bot_fixed.sh" << 'EOF'
+#!/bin/bash
+
+# Set proper environment
+export HOME="$USER_HOME"
+export USER="$TARGET_USER"
+unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+
+cd "$HOME"
+
+# Source conda
+source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+
+# Activate environment
+conda activate "$CONDA_ENV_NAME"
+
+# Verify Python
+if ! command -v python >/dev/null 2>&1; then
+    echo "⚠️ Python not found. Installing..."
+    conda install python=$PYTHON_VERSION -y
+fi
+
+if [ -d "$PROJECT_DIR" ]; then
+    cd "$PROJECT_DIR"
+    
+    echo "🤖 Looking for bot files..."
+    
+    if [ -f "main.py" ]; then
+        echo "🚀 Starting FlowAI Trading Bot (main.py)..."
+        python main.py
+    elif [ -f "bot.py" ]; then
+        echo "🚀 Starting FlowAI Trading Bot (bot.py)..."
+        python bot.py
+    elif [ -f "run.py" ]; then
+        echo "🚀 Starting FlowAI Trading Bot (run.py)..."
+        python run.py
+    elif [ -f "app.py" ]; then
+        echo "🚀 Starting FlowAI Trading Bot (app.py)..."
+        python app.py
+    else
+        echo "❌ Bot main file not found. Available Python files:"
+        ls -la *.py 2>/dev/null || echo "No Python files found"
+        echo ""
+        echo "📝 Please run manually: python <your_bot_file>.py"
+        echo "📁 Current directory: $(pwd)"
+        echo "📋 Directory contents:"
+        ls -la
+    fi
+else
+    echo "❌ Project directory not found: $PROJECT_DIR"
+    echo "📁 Please ensure the FlowAI project is properly installed"
+    echo "💡 You can clone it with: git clone https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot.git $PROJECT_DIR"
+fi
+EOF
+
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/run_bot_fixed.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/run_bot_fixed.sh"
+
+    chmod +x "$EXEC_DIR/run_bot_fixed.sh"
+    chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/run_bot_fixed.sh"
+    
+    sudo -u "$TARGET_USER" -H "$EXEC_DIR/run_bot_fixed.sh"
+    
+    rm -f "$EXEC_DIR/run_bot_fixed.sh"
+}
+
+# --- Function: Start Trading Bot (Background Service) ---
+start_trading_bot() {
+    log_info "Starting FlowAI Trading Bot as background service..."
+    
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 9 (Repair Installation) first."
+        return 1
+    fi
+    
+    # Check if project directory exists
+    if [ ! -d "$PROJECT_DIR" ]; then
+        log_error "Project directory not found: $PROJECT_DIR"
+        log_info "Please clone the project first"
+        return 1
+    fi
+    
+    # Check if bot is already running
+    if pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" >/dev/null; then
+        log_warning "Trading bot appears to be already running!"
+        echo "Running Python processes:"
+        pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" -l
+        read -p "Do you want to stop existing processes and restart? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            stop_trading_bot
+        else
+            return 1
+        fi
+    fi
+    
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
+    # Find the main bot file
+    BOT_FILE=""
+    for file in "main.py" "bot.py" "run.py" "app.py"; do
+        if [ -f "$PROJECT_DIR/$file" ]; then
+            BOT_FILE="$file"
+            break
+        fi
+    done
+    
+    if [ -z "$BOT_FILE" ]; then
+        log_error "No bot main file found in $PROJECT_DIR"
+        echo "Available Python files:"
+        ls -la "$PROJECT_DIR"/*.py 2>/dev/null || echo "No Python files found"
+        return 1
+    fi
+    
+    # Create start script
+    cat > "$EXEC_DIR/start_bot.sh" << 'EOF'
+#!/bin/bash
+
+# Set proper environment
+export HOME="$USER_HOME"
+export USER="$TARGET_USER"
+unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+
+cd "$HOME"
+
+# Source conda
+source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+
+# Activate environment
+conda activate "$CONDA_ENV_NAME"
+
+# Change to project directory
+cd "$PROJECT_DIR"
+
+# Create logs directory
+mkdir -p logs
+
+# Start bot with logging
+echo "🚀 Starting FlowAI Trading Bot ($BOT_FILE)..."
+echo "📁 Working directory: $(pwd)"
+echo "🐍 Python: $(which python)"
+echo "📝 Log file: logs/bot.log"
+echo "🕒 Started at: $(date)"
+
+# Start bot in background with logging
+nohup python "$BOT_FILE" > logs/bot.log 2>&1 &
+BOT_PID=$!
+
+# Save PID for stopping later
+echo $BOT_PID > "$USER_HOME/.flowai_bot.pid"
+
+echo "✅ Bot started with PID: $BOT_PID"
+echo "📋 To view logs: tail -f $PROJECT_DIR/logs/bot.log"
+echo "🛑 To stop bot: use the stop option in management menu"
+EOF
+
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/start_bot.sh"
+    sed -i "s|\$BOT_FILE|$BOT_FILE|g" "$EXEC_DIR/start_bot.sh"
+
+    chmod +x "$EXEC_DIR/start_bot.sh"
+    chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/start_bot.sh"
+    
+    # Execute start script
+    sudo -u "$TARGET_USER" -H "$EXEC_DIR/start_bot.sh"
+    
+    rm -f "$EXEC_DIR/start_bot.sh"
+    
+    # Verify bot started
+    sleep 2
+    if [ -f "$USER_HOME/.flowai_bot.pid" ]; then
+        BOT_PID=$(cat "$USER_HOME/.flowai_bot.pid")
+        if ps -p "$BOT_PID" > /dev/null 2>&1; then
+            log_success "Trading bot started successfully! PID: $BOT_PID"
+            echo "📋 View logs: tail -f $PROJECT_DIR/logs/bot.log"
+        else
+            log_error "Bot failed to start. Check logs: $PROJECT_DIR/logs/bot.log"
+        fi
+    else
+        log_error "Failed to start bot"
+    fi
+}
+
+# --- Function: Stop Trading Bot ---
+stop_trading_bot() {
+    log_info "Stopping FlowAI Trading Bot..."
+    
+    STOPPED_ANY=false
+    
+    # Stop using saved PID
+    if [ -f "$USER_HOME/.flowai_bot.pid" ]; then
+        BOT_PID=$(cat "$USER_HOME/.flowai_bot.pid")
+        if ps -p "$BOT_PID" > /dev/null 2>&1; then
+            log_info "Stopping bot with PID: $BOT_PID"
+            kill "$BOT_PID"
+            sleep 2
+            
+            # Force kill if still running
+            if ps -p "$BOT_PID" > /dev/null 2>&1; then
+                log_warning "Force killing bot with PID: $BOT_PID"
+                kill -9 "$BOT_PID"
+            fi
+            
+            STOPPED_ANY=true
+        fi
+        rm -f "$USER_HOME/.flowai_bot.pid"
+    fi
+    
+    # Stop any remaining Python processes that might be the bot
+    PYTHON_PIDS=$(pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" 2>/dev/null || true)
+    if [ -n "$PYTHON_PIDS" ]; then
+        log_info "Found running Python bot processes: $PYTHON_PIDS"
+        read -p "Stop these processes? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            for pid in $PYTHON_PIDS; do
+                log_info "Stopping process: $pid"
+                kill "$pid" 2>/dev/null || true
+                sleep 1
+                # Force kill if still running
+                if ps -p "$pid" > /dev/null 2>&1; then
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
+            done
+            STOPPED_ANY=true
+        fi
+    fi
+    
+    if [ "$STOPPED_ANY" = true ]; then
+        log_success "Trading bot stopped successfully"
+    else
+        log_info "No running bot processes found"
+    fi
+    
+    # Show remaining Python processes
+    REMAINING=$(pgrep -f python 2>/dev/null || true)
+    if [ -n "$REMAINING" ]; then
+        echo ""
+        echo "📋 Remaining Python processes:"
+        ps -f -p $REMAINING 2>/dev/null || true
+    fi
+}
+
+# --- Function: Bot Status ---
+show_bot_status() {
+    log_info "FlowAI Trading Bot Status:"
+    echo ""
+    
+    # Check if PID file exists
+    if [ -f "$USER_HOME/.flowai_bot.pid" ]; then
+        BOT_PID=$(cat "$USER_HOME/.flowai_bot.pid")
+        if ps -p "$BOT_PID" > /dev/null 2>&1; then
+            echo "✅ Bot Status: Running (PID: $BOT_PID)"
+            echo "🕒 Started: $(ps -o lstart= -p "$BOT_PID")"
+            echo "💾 Memory: $(ps -o rss= -p "$BOT_PID" | awk '{print $1/1024 " MB"}')"
+            echo "⏱️  CPU Time: $(ps -o time= -p "$BOT_PID")"
+        else
+            echo "❌ Bot Status: Stopped (PID file exists but process not running)"
+            rm -f "$USER_HOME/.flowai_bot.pid"
+        fi
+    else
+        echo "❌ Bot Status: Stopped"
+    fi
+    
+    # Check for any Python bot processes
+    PYTHON_PIDS=$(pgrep -f "python.*main.py\|python.*bot.py\|python.*run.py" 2>/dev/null || true)
+    if [ -n "$PYTHON_PIDS" ]; then
+        echo ""
+        echo "🔍 Found Python bot processes:"
+        for pid in $PYTHON_PIDS; do
+            echo "   PID: $pid - $(ps -o cmd= -p "$pid")"
+        done
+    fi
+    
+    # Show recent logs if available
+    if [ -f "$PROJECT_DIR/logs/bot.log" ]; then
+        echo ""
+        echo "📋 Recent log entries (last 10 lines):"
+        echo "================================"
+        tail -10 "$PROJECT_DIR/logs/bot.log" 2>/dev/null || echo "Cannot read log file"
+        echo "================================"
+        echo "📝 Full log: $PROJECT_DIR/logs/bot.log"
+    fi
+}
+
+# --- Function: Edit .env File (Fixed) ---
+edit_env_file() {
+    log_info "Editing .env configuration file..."
+    
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 9 (Repair Installation) first."
+        return 1
+    fi
+    
+    # Fix project permissions first
+    fix_project_permissions
+    
+    # Check if project directory exists
+    if [ ! -d "$PROJECT_DIR" ]; then
+        log_info "Project directory not found. Creating and cloning..."
+        
+        # Create project directory with correct permissions
+        mkdir -p "$PROJECT_DIR"
+        chown "$TARGET_USER:$TARGET_USER" "$PROJECT_DIR"
+        
+        # Clone the project
+        sudo -u "$TARGET_USER" git clone https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot.git "$PROJECT_DIR" || {
+            log_warning "Failed to clone project. Creating empty directory."
+        }
+        
+        # Fix permissions again after cloning
+        chown -R "$TARGET_USER:$TARGET_USER" "$PROJECT_DIR"
+    fi
+    
+    ENV_FILE="$PROJECT_DIR/.env"
+    
+    # Create .env file if it doesn't exist
+    if [ ! -f "$ENV_FILE" ]; then
+        log_info "Creating new .env file..."
+        sudo -u "$TARGET_USER" cat > "$ENV_FILE" << 'EOF'
+# FlowAI Trading Bot Configuration
+
+# Telegram Bot Settings
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+
+# Trading Settings
+TRADING_PAIR=XAUUSD
+RISK_PERCENTAGE=2
+MAX_DAILY_TRADES=5
+
+# API Keys (if needed)
+BROKER_API_KEY=your_broker_api_key
+BROKER_SECRET=your_broker_secret
+
+# Database Settings (if needed)
+DATABASE_URL=sqlite:///flowai.db
+
+# Logging Level
+LOG_LEVEL=INFO
+EOF
+        log_success ".env file created at $ENV_FILE"
+    fi
+    
+    # Ensure proper ownership
+    chown "$TARGET_USER:$TARGET_USER" "$ENV_FILE"
+    chmod 644 "$ENV_FILE"
+    
+    # Show current content and edit options
+    echo ""
+    echo "📝 Current .env file content:"
+    echo "================================"
+    cat "$ENV_FILE"
+    echo "================================"
+    echo ""
+    echo "Choose editing method:"
+    echo "1) Edit with nano (recommended)"
+    echo "2) Edit with vim"
+    echo "3) Replace specific value"
+    echo "4) View only (no changes)"
+    echo ""
+    read -p "Choose option (1-4): " edit_choice
+    
+    case $edit_choice in
+        1)
+            sudo -u "$TARGET_USER" nano "$ENV_FILE"
+            ;;
+        2)
+            sudo -u "$TARGET_USER" vim "$ENV_FILE"
+            ;;
+        3)
+            echo "Available variables:"
+            grep -E "^[A-Z_]+" "$ENV_FILE" | cut -d'=' -f1
+            echo ""
+            read -p "Enter variable name to change: " var_name
+            read -p "Enter new value: " var_value
+            
+            if grep -q "^${var_name}=" "$ENV_FILE"; then
+                sed -i "s/^${var_name}=.*/${var_name}=${var_value}/" "$ENV_FILE"
+                log_success "Updated $var_name"
+            else
+                echo "${var_name}=${var_value}" >> "$ENV_FILE"
+                log_success "Added $var_name"
+            fi
+            ;;
+        4)
+            log_info "No changes made to .env file"
+            ;;
+        *)
+            log_error "Invalid option"
+            ;;
+    esac
+    
+    # Ensure ownership after editing
+    chown "$TARGET_USER:$TARGET_USER" "$ENV_FILE"
+    
+    echo ""
+    echo "📝 Updated .env file content:"
+    echo "================================"
+    cat "$ENV_FILE"
+    echo "================================"
+}
+
+# --- Function: Update Packages (Fixed) ---
+update_packages() {
+    log_info "Updating FlowAI packages..."
+    
+    # Check installation first
+    if [ "$(check_installation)" != "true" ]; then
+        log_error "FlowAI environment is not properly installed!"
+        log_info "Please run option 9 (Repair Installation) first."
+        return 1
+    fi
+    
+    # Install build dependencies first
+    install_build_dependencies
+    
+    # Fix permissions first
+    fix_permissions
+    
+    # Create executable directory
+    EXEC_DIR=$(create_exec_dir)
+    
+    cat > "$EXEC_DIR/update_packages_fixed.sh" << 'EOF'
+#!/bin/bash
+
+# Set proper environment
+export HOME="$USER_HOME"
+export USER="$TARGET_USER"
+unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
+
+cd "$HOME"
+
+# Source conda
+source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+
+# Activate environment
+conda activate "$CONDA_ENV_NAME"
+
+# Verify Python
+if ! command -v python >/dev/null 2>&1; then
+    echo "⚠️ Python not found. Installing..."
+    conda install python=$PYTHON_VERSION -y
+fi
+
+echo "📦 Updating pip..."
+python -m pip install --upgrade pip
+
+echo "📦 Updating conda packages..."
+conda update --all -y
+
+# Install/Update build tools in conda environment
+echo "📦 Installing build tools..."
+conda install -c anaconda gcc_linux-64 gxx_linux-64 -y || echo "⚠️ Could not install conda build tools"
+
+if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    echo "📦 Updating project requirements..."
+    pip install --upgrade -r "$PROJECT_DIR/requirements.txt" || echo "⚠️ Some requirements failed"
+else
+    echo "📦 Updating common packages..."
+    pip install --upgrade numpy pandas matplotlib seaborn requests python-telegram-bot scikit-learn
+fi
+
+# Update TA-Lib with better error handling
+echo "📦 Updating TA-Lib..."
+if conda install -c conda-forge ta-lib -y; then
+    echo "✅ TA-Lib updated via conda"
+elif pip install --upgrade TA-Lib --no-cache-dir; then
+    echo "✅ TA-Lib updated via pip"
+else
+    echo "⚠️ TA-Lib update failed - but existing version should still work"
+fi
+
+echo "✅ Package update completed!"
+
+# Show updated package versions
+echo ""
+echo "📋 Updated package versions:"
+python -c "
+import sys
+packages = ['numpy', 'pandas', 'requests']
+for pkg in packages:
+    try:
+        module = __import__(pkg)
+        print(f'  {pkg}: {getattr(module, \"__version__\", \"unknown\")}')
+    except ImportError:
+        print(f'  {pkg}: not installed')
+
+try:
+    import talib
+    print(f'  talib: {talib.__version__}')
+except ImportError:
+    print('  talib: not available')
+"
+EOF
+
+    # Replace variables in the script
+    sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/update_packages_fixed.sh"
+    sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/update_packages_fixed.sh"
+
+    chmod +x "$EXEC_DIR/update_packages_fixed.sh"
+    chown "$TARGET_USER:$TARGET_USER" "$EXEC_DIR/update_packages_fixed.sh"
+    
+    sudo -u "$TARGET_USER" -H "$EXEC_DIR/update_packages_fixed.sh"
+    
+    rm -f "$EXEC_DIR/update_packages_fixed.sh"
+    log_success "Packages updated successfully!"
 }
 
 # --- Function: Run Trading Bot (Fixed) ---
