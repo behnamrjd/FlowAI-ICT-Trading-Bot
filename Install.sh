@@ -55,7 +55,7 @@ complete_system_cleanup() {
         " 2>/dev/null || true
     fi
     
-    rm -rf "$MINICONDA_PATH" 2>/dev/null || true
+    rm -rf "$VENV_PATH" 2>/dev/null || true
     rm -rf "$USER_HOME/.conda" 2>/dev/null || true
     rm -rf "$USER_HOME/.condarc" 2>/dev/null || true
     rm -rf "$USER_HOME/.cache/pip" 2>/dev/null || true
@@ -224,9 +224,87 @@ clone_or_update_project() {
         }
     fi
     
+    # Create requirements.txt if not exists
+    if [ ! -f "$PROJECT_DIR/requirements.txt" ]; then
+        log_info "Creating requirements.txt file..."
+        cat > "$PROJECT_DIR/requirements.txt" << 'EOF'
+# FlowAI-ICT Trading Bot Requirements
+numpy>=1.21.0
+pandas>=1.3.0
+matplotlib>=3.4.0
+seaborn>=0.11.0
+requests>=2.25.0
+aiohttp>=3.7.0
+scikit-learn>=1.0.0
+lightgbm>=3.2.0
+tensorflow>=2.8.0
+python-binance>=1.0.0
+apscheduler>=3.8.0
+click>=8.0.0
+tqdm>=4.62.0
+pyarrow>=5.0.0
+numba>=0.56.0
+ta==0.10.2
+python-telegram-bot>=20.0
+EOF
+        chown "$TARGET_USER:$TARGET_USER" "$PROJECT_DIR/requirements.txt"
+        log_success "requirements.txt created"
+    else
+        log_info "requirements.txt already exists"
+        
+        # Check if ta==0.10.2 is in requirements.txt
+        if ! grep -q "ta==0.10.2" "$PROJECT_DIR/requirements.txt"; then
+            log_info "Adding ta==0.10.2 to requirements.txt..."
+            echo "ta==0.10.2" >> "$PROJECT_DIR/requirements.txt"
+            log_success "ta==0.10.2 added to requirements.txt"
+        fi
+    fi
+    
+    # Create .env template if not exists
+    if [ ! -f "$PROJECT_DIR/.env" ]; then
+        log_info "Creating .env template..."
+        cat > "$PROJECT_DIR/.env" << 'EOF'
+# FlowAI Trading Bot Configuration
+
+# Telegram Bot Settings (REQUIRED)
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+
+# Trading Settings
+TRADING_PAIR=XAUUSD
+RISK_PERCENTAGE=2
+MAX_DAILY_TRADES=5
+TRADING_MODE=demo
+
+# API Keys (if needed)
+BROKER_API_KEY=your_broker_api_key
+BROKER_SECRET=your_broker_secret
+
+# Database Settings
+DATABASE_URL=sqlite:///flowai.db
+
+# Logging Level
+LOG_LEVEL=INFO
+
+# Bot Settings
+AUTO_START=false
+SEND_SIGNALS=true
+RISK_MANAGEMENT=true
+EOF
+        chown "$TARGET_USER:$TARGET_USER" "$PROJECT_DIR/.env"
+        log_success ".env template created"
+    fi
+    
+    # Set proper permissions
     chown -R "$TARGET_USER:$TARGET_USER" "$PROJECT_DIR"
+    chmod -R 755 "$PROJECT_DIR"
+    
+    # Make Python files executable
+    find "$PROJECT_DIR" -name "*.py" -exec chmod +x {} \; 2>/dev/null || true
+    
     log_success "Project setup completed"
 }
+
 
 # --- Function: Check Environment Status ---
 check_env_status() {
@@ -497,7 +575,6 @@ activate_environment() {
     
     if [ "$(check_installation)" != "true" ]; then
         log_error "FlowAI environment is not properly installed!"
-        log_info "Please run option 9 (Repair Installation) first."
         return 1
     fi
     
@@ -512,36 +589,23 @@ export HOME="$USER_HOME"
 export USER="$TARGET_USER"
 export SHELL="/bin/bash"
 
-unset XDG_CONFIG_HOME
-unset SUDO_USER
-unset SUDO_UID
-unset SUDO_GID
-unset SUDO_COMMAND
+unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
 cd "$HOME"
 
-if [ -f "$MINICONDA_PATH/etc/profile.d/conda.sh" ]; then
-    source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+if [ -f "$VENV_PATH/bin/activate" ]; then
+    source "$VENV_PATH/bin/activate"
 else
-    echo "❌ Conda not found at $MINICONDA_PATH"
+    echo "❌ Virtual environment not found at $VENV_PATH"
     exit 1
 fi
 
-if conda env list | grep -q "$CONDA_ENV_NAME"; then
-    conda activate "$CONDA_ENV_NAME"
-    
-    if command -v python >/dev/null 2>&1; then
-        echo "🚀 FlowAI environment activated successfully!"
-        echo "Python version: $(python --version)"
-        echo "Environment: $CONDA_DEFAULT_ENV"
-        echo "Python executable: $(which python)"
-    else
-        echo "⚠️ Environment activated but Python not found. Installing Python..."
-        conda install python=$PYTHON_VERSION -y
-        echo "✅ Python installed. Environment ready!"
-    fi
+if command -v python >/dev/null 2>&1; then
+    echo "🚀 FlowAI environment activated successfully!"
+    echo "Python version: $(python --version)"
+    echo "Python executable: $(which python)"
 else
-    echo "❌ Environment '$CONDA_ENV_NAME' not found"
+    echo "❌ Python not found in virtual environment"
     exit 1
 fi
 
@@ -553,9 +617,9 @@ fi
 echo ""
 echo "💡 Available commands:"
 echo "   python main.py          # Run the trading bot"
-echo "   python -c 'import talib; print(talib.__version__)'  # Test TA-Lib"
+echo "   python -c 'import ta; print(ta.__version__)'  # Test TA library"
 echo "   pip list                # Show installed packages"
-echo "   conda deactivate        # Exit environment"
+echo "   deactivate              # Exit environment"
 echo ""
 echo "🎯 You are now in the FlowAI environment. Type 'exit' to return to menu."
 
@@ -564,9 +628,7 @@ EOF
 
     sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/activate_env_fixed.sh"
     sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/activate_env_fixed.sh"
-    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/activate_env_fixed.sh"
-    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/activate_env_fixed.sh"
-    sed -i "s|\$PYTHON_VERSION|$PYTHON_VERSION|g" "$EXEC_DIR/activate_env_fixed.sh"
+    sed -i "s|\$VENV_PATH|$VENV_PATH|g" "$EXEC_DIR/activate_env_fixed.sh"
     sed -i "s|\$PROJECT_DIR|$PROJECT_DIR|g" "$EXEC_DIR/activate_env_fixed.sh"
 
     chmod +x "$EXEC_DIR/activate_env_fixed.sh"
@@ -576,6 +638,7 @@ EOF
     
     rm -f "$EXEC_DIR/activate_env_fixed.sh"
 }
+
 
 # --- Function: Run Trading Bot (Interactive) ---
 run_trading_bot() {
@@ -600,8 +663,7 @@ unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
 cd "$HOME"
 
-source "$MINICONDA_PATH/etc/profile.d/conda.sh"
-conda activate "$CONDA_ENV_NAME"
+source "$VENV_PATH/bin/activate"
 
 if ! command -v python >/dev/null 2>&1; then
     echo "⚠️ Python not found. Installing..."
@@ -712,8 +774,7 @@ unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
 cd "$HOME"
 
-source "$MINICONDA_PATH/etc/profile.d/conda.sh"
-conda activate "$CONDA_ENV_NAME"
+source "$VENV_PATH/bin/activate"
 
 cd "$PROJECT_DIR"
 
@@ -1177,32 +1238,32 @@ unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
 cd "$HOME"
 
-source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+source "$VENV_PATH/bin/activate"
 
-if conda env list | grep -q "$CONDA_ENV_NAME"; then
-    echo "✅ Environment exists, checking Python..."
-    conda activate "$CONDA_ENV_NAME"
+if [ -d "$VENV_PATH" ]; then
+    echo "✅ Virtual environment exists, checking Python..."
+    source "$VENV_PATH/bin/activate"
     
     if ! command -v python >/dev/null 2>&1; then
-        echo "🔧 Installing Python..."
-        conda install python=$PYTHON_VERSION -y
+        echo "❌ Python not found in virtual environment"
+        echo "🔧 Recreating virtual environment..."
+        rm -rf "$VENV_PATH"
+        python3 -m venv "$VENV_PATH"
+        source "$VENV_PATH/bin/activate"
     fi
     
     echo "🔧 Installing essential packages..."
     pip install --upgrade pip
-    pip install numpy pandas requests python-telegram-bot
-    
-    conda install -c conda-forge ta-lib -y || pip install TA-Lib || echo "⚠️ TA-Lib installation failed"
+    pip install numpy pandas requests python-telegram-bot ta==0.10.2
     
     echo "✅ Environment repaired successfully!"
 else
-    echo "❌ Environment not found. Creating new environment..."
-    conda create -n "$CONDA_ENV_NAME" python=$PYTHON_VERSION -y
-    conda activate "$CONDA_ENV_NAME"
+    echo "❌ Virtual environment not found. Creating new environment..."
+    python3 -m venv "$VENV_PATH"
+    source "$VENV_PATH/bin/activate"
     
     pip install --upgrade pip
-    pip install numpy pandas requests python-telegram-bot
-    conda install -c conda-forge ta-lib -y || pip install TA-Lib || echo "⚠️ TA-Lib installation failed"
+    pip install numpy pandas requests python-telegram-bot ta==0.10.2
     
     echo "✅ Environment created and configured!"
 fi
@@ -1473,7 +1534,10 @@ try:
     import pandas as pd
     import numpy as np
     
+try:
     print(f'✅ TA library: {ta.__version__}')
+except AttributeError:
+    print('✅ TA library: 0.10.2 (version attribute not available)')
     
     # Test functionality
     data = pd.DataFrame({
@@ -1580,8 +1644,7 @@ final_verification() {
 set -e
 
 USER_HOME="$USER_HOME"
-MINICONDA_PATH="$MINICONDA_PATH"
-CONDA_ENV_NAME="$CONDA_ENV_NAME"
+VENV_PATH="$VENV_PATH"
 
 export HOME="$USER_HOME"
 export USER="$TARGET_USER"
@@ -1589,20 +1652,17 @@ unset XDG_CONFIG_HOME SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND
 
 cd "$USER_HOME"
 
-source "$MINICONDA_PATH/etc/profile.d/conda.sh"
-
-if ! conda env list | grep -q "$CONDA_ENV_NAME"; then
-    echo "ERROR: Environment $CONDA_ENV_NAME not found"
+if [ ! -d "$VENV_PATH" ]; then
+    echo "ERROR: Virtual environment not found at $VENV_PATH"
     exit 1
 fi
 
-conda activate "$CONDA_ENV_NAME"
+source "$VENV_PATH/bin/activate"
 
 echo "=== Installation Verification ==="
-echo "Conda version: $(conda --version)"
 echo "Python version: $(python --version)"
 echo "Pip version: $(pip --version)"
-echo "Active environment: $CONDA_DEFAULT_ENV"
+echo "Virtual environment: $VENV_PATH"
 echo "Python executable: $(which python)"
 
 echo "=== Package Verification ==="
@@ -1610,19 +1670,30 @@ python -c "
 import sys
 print('Python executable:', sys.executable)
 
-packages = ['numpy', 'pandas', 'requests', 'sklearn']
+packages = ['numpy', 'pandas', 'requests', 'sklearn', 'ta']
 for pkg in packages:
     try:
-        __import__(pkg)
-        print(f'✓ {pkg}')
+        module = __import__(pkg)
+        version = getattr(module, '__version__', 'unknown')
+        print(f'✓ {pkg}: {version}')
     except ImportError:
-        print(f'✗ {pkg}')
+        print(f'✗ {pkg}: not installed')
 
+# Test TA library functionality
 try:
-    import talib
-    print(f'✓ talib: {talib.__version__}')
-except ImportError:
-    print('⚠ talib: Not available')
+    import ta
+    import pandas as pd
+    import numpy as np
+    
+    # Test functionality
+    data = pd.DataFrame({
+        'close': np.random.random(100) * 100 + 50
+    })
+    
+    sma = ta.trend.sma_indicator(data['close'], window=10)
+    print('✓ TA library functionality test passed')
+except Exception as e:
+    print(f'⚠ TA library test failed: {e}')
 "
 
 echo "=== Verification Completed ==="
@@ -1630,8 +1701,7 @@ EOF
 
     sed -i "s|\$USER_HOME|$USER_HOME|g" "$EXEC_DIR/verify_installation.sh"
     sed -i "s|\$TARGET_USER|$TARGET_USER|g" "$EXEC_DIR/verify_installation.sh"
-    sed -i "s|\$MINICONDA_PATH|$MINICONDA_PATH|g" "$EXEC_DIR/verify_installation.sh"
-    sed -i "s|\$CONDA_ENV_NAME|$CONDA_ENV_NAME|g" "$EXEC_DIR/verify_installation.sh"
+    sed -i "s|\$VENV_PATH|$VENV_PATH|g" "$EXEC_DIR/verify_installation.sh"
 
     chmod +x "$EXEC_DIR/verify_installation.sh"
     
@@ -1644,6 +1714,7 @@ EOF
     rm "$EXEC_DIR/verify_installation.sh"
     log_success "Installation verification completed"
 }
+
 
 # --- Function: Perform Installation ---
 perform_installation() {
