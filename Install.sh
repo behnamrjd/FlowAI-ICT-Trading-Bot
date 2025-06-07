@@ -191,6 +191,8 @@ install_build_dependencies() {
     apt-get update -qq
     apt-get install -y build-essential gcc g++ make cmake
     
+    # تعریف متغیر PYTHON_EXECUTABLE
+    PYTHON_EXECUTABLE="python3"
     PYTHON_MAJMIN=$($PYTHON_EXECUTABLE -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     apt-get install -y python${PYTHON_MAJMIN}-dev
     
