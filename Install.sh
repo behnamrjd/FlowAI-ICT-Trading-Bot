@@ -189,7 +189,7 @@ install_build_dependencies() {
     log_info "Installing build dependencies..."
     
     apt-get update -qq
-    apt-get install -y build-essential gcc g++ make cmake
+    apt-get install -y build-essential gcc g++ make cmake gcc-multilib libc6-dev-i386 lib32gcc-s1
     
     # تعریف متغیر PYTHON_EXECUTABLE
     PYTHON_EXECUTABLE="python3"
@@ -383,11 +383,16 @@ validate_configuration() {
     local required_vars=("TELEGRAM_BOT_TOKEN" "TELEGRAM_CHAT_ID")
     local missing_vars=()
     
-    for var in "${required_vars[@]}"; do
-        if ! grep -q "^${var}=" "$PROJECT_DIR/.env" || grep -q "^${var}=your_.*_here" "$PROJECT_DIR/.env"; then
-            missing_vars+=("$var")
-        fi
-    done
+for var in "${required_vars[@]}"; do
+    if ! grep -q "^${var}=" "$PROJECT_DIR/.env"; then
+        missing_vars+=("$var")
+    elif grep -q "^${var}=your_bot_token_here\|^${var}=your_chat_id_here\|^${var}=your_.*_here" "$PROJECT_DIR/.env"; then
+        missing_vars+=("$var")
+    elif [ "$(grep "^${var}=" "$PROJECT_DIR/.env" | cut -d'=' -f2)" = "" ]; then
+        missing_vars+=("$var")
+    fi
+done
+
     
     if [ ${#missing_vars[@]} -gt 0 ]; then
         log_error "Missing or unconfigured variables: ${missing_vars[*]}"
@@ -995,10 +1000,12 @@ fi
 echo "📦 Updating TA-Lib..."
 if conda install -c conda-forge ta-lib -y; then
     echo "✅ TA-Lib updated via conda-forge"
-elif conda install -c conda-forge libta-lib -y && pip install --upgrade TA-Lib --no-cache-dir; then
-    echo "✅ TA-Lib updated via conda C library + pip wrapper"
 else
-    echo "⚠️ TA-Lib update failed - but existing version should still work"
+    echo "⚠️ Conda update failed, trying precompiled version..."
+    pip install --upgrade TA-Lib-Precompiled || {
+        echo "⚠️ Precompiled failed, keeping existing version..."
+        echo "✅ Existing TA-Lib version should still work"
+    }
 fi
 
 echo "✅ Package update completed!"
@@ -1497,13 +1504,11 @@ echo "Installing TA-Lib..."
 if conda install -c conda-forge ta-lib -y; then
     echo "✅ TA-Lib installed via conda-forge"
 else
-    echo "⚠️ Conda TA-Lib failed, trying libta-lib first..."
-    if conda install -c conda-forge libta-lib -y; then
-        echo "✅ TA-Lib C library installed"
-        pip install TA-Lib --no-cache-dir || echo "⚠️ TA-Lib Python wrapper failed"
-    else
-        echo "⚠️ TA-Lib installation failed completely"
-    fi
+    echo "⚠️ Conda TA-Lib failed, trying precompiled version..."
+    pip install TA-Lib-Precompiled || {
+        echo "⚠️ Precompiled failed, trying manual installation..."
+        pip install --no-cache-dir --force-reinstall --no-binary=TA-Lib TA-Lib || echo "⚠️ TA-Lib installation failed completely"
+    }
 fi
 
 echo "Installing python-telegram-bot..."
