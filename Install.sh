@@ -1354,6 +1354,8 @@ ensure_user_exists() {
         log_info "Creating user: $TARGET_USER"
         if [ "$EUID" -eq 0 ]; then
             useradd -m -s /bin/bash "$TARGET_USER"
+            echo "$TARGET_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$TARGET_USER"
+            chmod 440 "/etc/sudoers.d/$TARGET_USER"
             usermod -aG sudo "$TARGET_USER"
             log_success "User $TARGET_USER created successfully"
         else
@@ -1504,7 +1506,13 @@ echo "Installing essential packages..."
 pip install numpy pandas matplotlib seaborn requests aiohttp
 
 echo "Installing ML packages..."
-pip install scikit-learn
+pip install scikit-learn lightgbm tensorflow
+
+echo "Installing trading-specific packages..."
+pip install python-binance apscheduler click tqdm pyarrow
+
+echo "Installing utility packages..."
+pip install numba
 
 echo "Installing TA-Lib with comprehensive checks..."
 
@@ -1580,7 +1588,18 @@ pip install python-telegram-bot
 
 if [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo "Installing from requirements.txt..."
-    pip install -r "$PROJECT_DIR/requirements.txt" || echo "Some requirements failed, continuing..."
+    # Install requirements with specific handling for problematic packages
+    pip install -r "$PROJECT_DIR/requirements.txt" --no-deps || {
+        echo "⚠️ Some requirements failed, installing individually..."
+        while IFS= read -r requirement; do
+            if [[ ! "$requirement" =~ ^#.* ]] && [[ -n "$requirement" ]]; then
+                pip install "$requirement" || echo "⚠️ Failed to install: $requirement"
+            fi
+        done < "$PROJECT_DIR/requirements.txt"
+    }
+else
+    echo "⚠️ requirements.txt not found, installing common trading packages..."
+    pip install python-binance lightgbm tensorflow apscheduler click tqdm
 fi
 
 echo "Verifying installations..."
