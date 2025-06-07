@@ -14,7 +14,7 @@ log_success() { echo -e "\033[32m[SUCCESS]\033[0m $1"; }
 
 # --- Configuration Variables ---
 CONDA_ENV_NAME="flowai_env"
-PYTHON_VERSION="3.11"
+PYTHON_VERSION="3.12"
 TARGET_USER="flowaibot"
 USER_HOME="/home/$TARGET_USER"
 MINICONDA_PATH="$USER_HOME/miniconda3"
