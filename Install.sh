@@ -633,7 +633,7 @@ run_installation() {
     install_python_dependencies || exit 1
     pause_with_message
     
-    # Fix known issues
+    # Fix known issues AFTER download
     fix_main_py_issues || exit 1
     pause_with_message
     
@@ -669,6 +669,7 @@ run_installation() {
     
     pause_with_message
 }
+
 
 verify_installation() {
     print_step "Verifying installation..."
