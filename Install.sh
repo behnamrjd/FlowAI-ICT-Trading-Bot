@@ -195,7 +195,8 @@ install_build_dependencies() {
     apt-get install -y build-essential gcc g++ make cmake wget tar autoconf automake libtool pkg-config git
     
     # Install TA-Lib system package (critical for avoiding compilation issues)
-    apt-get install -y libta-lib-dev libta-lib0
+    # Remove libta-lib packages (not available in Ubuntu repos)
+# TA-Lib will be installed from source in install_python_packages()
     
     # Install Python development headers
     PYTHON_MAJMIN=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
@@ -1518,25 +1519,24 @@ fi
 
 # Step 2: Install TA-Lib C library if needed
 if [ "$TA_LIB_AVAILABLE" = false ]; then
-    echo "Installing TA-Lib C library from source..."
-    cd /tmp
-    
-    # Clean any previous attempts
-    rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
-    
-    # Download and install
-    wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-    tar -xzf ta-lib-0.4.0-src.tar.gz
-    cd ta-lib/
-    
-    # Configure with proper prefix
-    ./configure --prefix=/usr/local
-    make clean
-    make
-    sudo make install
-    
-    # Update library cache
-    sudo ldconfig
+echo "Installing TA-Lib C library from source..."
+cd /tmp
+
+# Clean any previous attempts
+rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
+
+wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+tar -xzf ta-lib-0.4.0-src.tar.gz
+cd ta-lib/
+
+wget 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD' -O './config.guess'
+wget 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD' -O './config.sub'
+
+# Configure and install (بر اساس نتایج جستجو[6])
+./configure --prefix=/usr
+make
+sudo make install
+sudo ldconfig
     
     # Verify installation
     if ldconfig -p | grep -q libta_lib; then
