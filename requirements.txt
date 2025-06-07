@@ -9,3 +9,9 @@ joblib
 ccxt
 TA-Lib
 tenacity
+python-binance
+lightgbm
+tensorflow
+apscheduler
+click
+tqdm
