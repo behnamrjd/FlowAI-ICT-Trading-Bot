@@ -1501,15 +1501,34 @@ echo "Installing ML packages..."
 pip install scikit-learn
 
 echo "Installing TA-Lib..."
-if conda install -c conda-forge ta-lib -y; then
-    echo "✅ TA-Lib installed via conda-forge"
+# Install C library first (outside conda environment)
+echo "Installing TA-Lib C library..."
+cd /tmp
+wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+tar -xzf ta-lib-0.4.0-src.tar.gz
+cd ta-lib/
+./configure --prefix=/usr/local
+make
+make install
+ldconfig
+
+# Return to user home and activate conda environment
+cd "$USER_HOME"
+source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+conda activate "$CONDA_ENV_NAME"
+
+# Set environment variables and install Python wrapper
+export TA_LIBRARY_PATH="/usr/local/lib"
+export TA_INCLUDE_PATH="/usr/local/include"
+
+if pip install TA-Lib --no-cache-dir; then
+    echo "✅ TA-Lib installed successfully"
 else
-    echo "⚠️ Conda TA-Lib failed, trying precompiled version..."
-    pip install TA-Lib-Precompiled || {
-        echo "⚠️ Precompiled failed, trying manual installation..."
-        pip install --no-cache-dir --force-reinstall --no-binary=TA-Lib TA-Lib || echo "⚠️ TA-Lib installation failed completely"
-    }
+    echo "⚠️ TA-Lib installation failed, but continuing..."
 fi
+
+# Clean up
+rm -rf /tmp/ta-lib /tmp/ta-lib-0.4.0-src.tar.gz
 
 echo "Installing python-telegram-bot..."
 pip install python-telegram-bot
