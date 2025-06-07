@@ -1,18 +1,23 @@
-# This file makes the 'flow_ai_core' directory a Python package.
-# It can be empty, or you can use it to make certain modules or functions
-# easily accessible when importing the package.
+"""
+FlowAI ICT Trading Bot Core Module
+Advanced AI-Powered Gold Trading System
+"""
 
-# For example, you could do:
-# from .config import SYMBOL, TIMEFRAME # etc.
-# from .utils import logger
+__version__ = "2.0.0"
+__author__ = "Behnam RJD"
+__description__ = "FlowAI XAU Trading Bot - Advanced AI-Powered Gold Trading System"
 
-# For now, let'has_key_ft keep it simple and allow direct imports like:
-# from flow_ai_core.config import SYMBOL
-# from flow_ai_core.utils import logger
+# Core modules
+from . import config
+from . import data_handler
+from . import ict_analysis
+from . import telegram_bot
+from . import utils
 
-# You can also define a __all__ variable if you want to specify what
-# `from flow_ai_core import *` would import, but explicit imports are generally preferred.
-
-# logger = utils.logger # Make logger directly available as flow_ai_core.logger (if utils is imported above)
-
-# No specific code needed here for basic package functionality.
+__all__ = [
+    'config',
+    'data_handler', 
+    'ict_analysis',
+    'telegram_bot',
+    'utils'
+]
