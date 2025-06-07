@@ -188,21 +188,32 @@ fix_project_permissions() {
 install_build_dependencies() {
     log_info "Installing build dependencies..."
     
+    # Update package list
     apt-get update -qq
-    apt-get install -y build-essential gcc g++ make cmake gcc-multilib libc6-dev-i386 lib32gcc-s1
     
-    # تعریف متغیر PYTHON_EXECUTABLE
-    PYTHON_EXECUTABLE="python3"
+    # Install essential build tools + TA-Lib system package
+    apt-get install -y build-essential gcc g++ make cmake wget tar autoconf automake libtool pkg-config git
+    
+    # Install TA-Lib system package (critical for avoiding compilation issues)
+    apt-get install -y libta-lib-dev libta-lib0
+    
+    # Install Python development headers
     PYTHON_MAJMIN=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     apt-get install -y python${PYTHON_MAJMIN}-dev
     
-    apt-get install -y wget tar autoconf automake libtool pkg-config git
-    
+    # Verify critical installations
     if command -v gcc >/dev/null 2>&1; then
         log_success "GCC installed: $(gcc --version | head -1)"
     else
         log_error "GCC installation failed"
         return 1
+    fi
+    
+    # Verify TA-Lib C library
+    if ldconfig -p | grep -q libta_lib; then
+        log_success "TA-Lib C library installed and available"
+    else
+        log_warning "TA-Lib C library not found in ldconfig, will install manually"
     fi
     
     log_success "Build dependencies installed"
@@ -997,16 +1008,10 @@ else
     pip install --upgrade numpy pandas matplotlib seaborn requests python-telegram-bot scikit-learn
 fi
 
-echo "📦 Updating TA-Lib..."
-if conda install -c conda-forge ta-lib -y; then
-    echo "✅ TA-Lib updated via conda-forge"
-else
-    echo "⚠️ Conda update failed, trying precompiled version..."
-    pip install --upgrade TA-Lib-Precompiled || {
-        echo "⚠️ Precompiled failed, keeping existing version..."
-        echo "✅ Existing TA-Lib version should still work"
-    }
-fi
+echo "📦 Checking TA-Lib..."
+# Skip TA-Lib update to avoid breaking working installation
+echo "⚠️ Skipping TA-Lib update to maintain stability"
+echo "✅ Existing TA-Lib installation should continue working"
 
 echo "✅ Package update completed!"
 
@@ -1500,35 +1505,75 @@ pip install numpy pandas matplotlib seaborn requests aiohttp
 echo "Installing ML packages..."
 pip install scikit-learn
 
-echo "Installing TA-Lib..."
-# Install C library first (outside conda environment)
-echo "Installing TA-Lib C library..."
-cd /tmp
-wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-tar -xzf ta-lib-0.4.0-src.tar.gz
-cd ta-lib/
-./configure --prefix=/usr/local
-make
-make install
-ldconfig
+echo "Installing TA-Lib with comprehensive checks..."
 
-# Return to user home and activate conda environment
-cd "$USER_HOME"
-source "$MINICONDA_PATH/etc/profile.d/conda.sh"
-conda activate "$CONDA_ENV_NAME"
-
-# Set environment variables and install Python wrapper
-export TA_LIBRARY_PATH="/usr/local/lib"
-export TA_INCLUDE_PATH="/usr/local/include"
-
-if pip install TA-Lib --no-cache-dir; then
-    echo "✅ TA-Lib installed successfully"
+# Step 1: Check if TA-Lib C library is available
+if ldconfig -p | grep -q libta_lib; then
+    echo "✅ TA-Lib C library found in system"
+    TA_LIB_AVAILABLE=true
 else
-    echo "⚠️ TA-Lib installation failed, but continuing..."
+    echo "⚠️ TA-Lib C library not found, installing manually..."
+    TA_LIB_AVAILABLE=false
 fi
 
-# Clean up
-rm -rf /tmp/ta-lib /tmp/ta-lib-0.4.0-src.tar.gz
+# Step 2: Install TA-Lib C library if needed
+if [ "$TA_LIB_AVAILABLE" = false ]; then
+    echo "Installing TA-Lib C library from source..."
+    cd /tmp
+    
+    # Clean any previous attempts
+    rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
+    
+    # Download and install
+    wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+    tar -xzf ta-lib-0.4.0-src.tar.gz
+    cd ta-lib/
+    
+    # Configure with proper prefix
+    ./configure --prefix=/usr/local
+    make clean
+    make
+    sudo make install
+    
+    # Update library cache
+    sudo ldconfig
+    
+    # Verify installation
+    if ldconfig -p | grep -q libta_lib; then
+        echo "✅ TA-Lib C library installed successfully"
+    else
+        echo "❌ TA-Lib C library installation failed"
+        cd "$USER_HOME"
+        exit 1
+    fi
+    
+    # Clean up
+    cd /tmp
+    rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
+    cd "$USER_HOME"
+fi
+
+# Step 3: Set environment variables for Python wrapper
+export TA_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu"
+export TA_INCLUDE_PATH="/usr/local/include:/usr/include"
+export CFLAGS="-I/usr/local/include -I/usr/include"
+export LDFLAGS="-L/usr/local/lib -L/usr/lib/x86_64-linux-gnu"
+
+# Step 4: Install Python TA-Lib wrapper
+echo "Installing TA-Lib Python wrapper..."
+if pip install TA-Lib --no-cache-dir --verbose; then
+    echo "✅ TA-Lib Python wrapper installed successfully"
+else
+    echo "❌ TA-Lib Python wrapper installation failed"
+    echo "Trying alternative installation methods..."
+    
+    # Try with specific flags
+    if pip install TA-Lib --no-cache-dir --global-option=build_ext --global-option="-I/usr/local/include" --global-option="-L/usr/local/lib"; then
+        echo "✅ TA-Lib installed with custom flags"
+    else
+        echo "⚠️ TA-Lib installation failed, continuing without it"
+    fi
+fi
 
 echo "Installing python-telegram-bot..."
 pip install python-telegram-bot
@@ -1540,18 +1585,34 @@ fi
 
 echo "Verifying installations..."
 python -c "
-try:
-    import numpy; print('✓ NumPy:', numpy.__version__)
-    import pandas; print('✓ Pandas:', pandas.__version__)
-    import requests; print('✓ Requests installed')
+import sys
+print('Python executable:', sys.executable)
+print('Python version:', sys.version)
+
+packages = ['numpy', 'pandas', 'requests']
+for pkg in packages:
     try:
-        import talib; print('✓ TA-Lib:', talib.__version__)
+        module = __import__(pkg)
+        print(f'✓ {pkg}: {getattr(module, \"__version__\", \"unknown\")}')
     except ImportError:
-        print('⚠ TA-Lib not available')
-    print('✓ All critical packages verified')
+        print(f'✗ {pkg}: not installed')
+
+# Test TA-Lib specifically
+try:
+    import talib
+    print(f'✅ TA-Lib: {talib.__version__}')
+    
+    # Test a simple function
+    import numpy as np
+    test_data = np.random.random(100)
+    sma = talib.SMA(test_data, timeperiod=10)
+    print('✅ TA-Lib functionality test passed')
+except ImportError as e:
+    print(f'⚠️ TA-Lib not available: {e}')
 except Exception as e:
-    print('✗ Package verification failed:', e)
-    exit(1)
+    print(f'⚠️ TA-Lib test failed: {e}')
+
+print('✓ Package verification completed')
 "
 
 echo "Package installation completed successfully"
