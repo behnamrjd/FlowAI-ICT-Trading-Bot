@@ -2,6 +2,7 @@
 """
 FlowAI ICT Trading Bot - Main Application
 Advanced AI-Powered Gold Trading System with ICT Analysis
+Version: 2.1 - Fixed All Issues
 """
 
 import sys
@@ -31,7 +32,7 @@ ai_model = None
 ai_features = None
 bot_running = True
 
-
+def load_ai_model():
     """Load the trained AI model with metadata"""
     global ai_model, ai_features
     
@@ -55,12 +56,12 @@ bot_running = True
                 logger.info(f"AI Model features loaded: {len(ai_features)} features")
             else:
                 logger.warning("Model features file not found")
+                ai_features = []
                 
     except Exception as e:
         logger.error(f"Failed to load AI model: {e}")
         ai_model = None
         ai_features = None
-
 
 def engineer_features(df):
     """Create advanced features for AI model - UPDATED VERSION"""
@@ -79,17 +80,26 @@ def engineer_features(df):
     features['volatility_20'] = df['Close'].rolling(20).std().fillna(0)
     features['volatility_ratio'] = (features['volatility_5'] / features['volatility_20']).fillna(1)
     
-    # ATR
+    # ATR with safe division
     high_low = df['High'] - df['Low']
     high_close = np.abs(df['High'] - df['Close'].shift())
     low_close = np.abs(df['Low'] - df['Close'].shift())
     true_range = np.maximum(high_low, np.maximum(high_close, low_close))
     features['atr'] = true_range.rolling(14).mean().fillna(0)
-    features['atr_ratio'] = (true_range / features['atr']).fillna(1)
+    
+    # Safe ATR ratio
+    atr_values = features['atr'].values
+    atr_ratio = np.where(atr_values != 0, true_range / atr_values, 1.0)
+    features['atr_ratio'] = pd.Series(atr_ratio, index=df.index).fillna(1)
     
     # === VOLUME FEATURES ===
     features['volume_sma'] = df['Volume'].rolling(20).mean().fillna(df['Volume'])
-    features['volume_ratio'] = (df['Volume'] / features['volume_sma']).fillna(1)
+    
+    # Safe volume ratio
+    volume_sma_values = features['volume_sma'].values
+    volume_ratio = np.where(volume_sma_values != 0, df['Volume'] / volume_sma_values, 1.0)
+    features['volume_ratio'] = pd.Series(volume_ratio, index=df.index).fillna(1)
+    
     features['volume_volatility'] = df['Volume'].rolling(10).std().fillna(0)
     features['pv_trend'] = (features['price_change'] * np.log1p(features['volume_ratio'])).fillna(0)
     
@@ -98,17 +108,22 @@ def engineer_features(df):
     features['sma_20'] = df['Close'].rolling(20).mean().fillna(df['Close'])
     features['sma_50'] = df['Close'].rolling(50).mean().fillna(df['Close'])
     
-    features['price_sma5_ratio'] = (df['Close'] / features['sma_5']).fillna(1)
-    features['price_sma20_ratio'] = (df['Close'] / features['sma_20']).fillna(1)
-    features['sma_cross'] = (features['sma_5'] / features['sma_20']).fillna(1)
+    # Safe ratios
+    sma5_values = features['sma_5'].values
+    sma20_values = features['sma_20'].values
     
-    # RSI
+    features['price_sma5_ratio'] = np.where(sma5_values != 0, df['Close'] / sma5_values, 1.0)
+    features['price_sma20_ratio'] = np.where(sma20_values != 0, df['Close'] / sma20_values, 1.0)
+    features['sma_cross'] = np.where(sma20_values != 0, sma5_values / sma20_values, 1.0)
+    
+    # RSI with safe calculation
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
+    
+    rs = np.where(loss != 0, gain / loss, 0)
     features['rsi'] = 100 - (100 / (1 + rs))
-    features['rsi'] = features['rsi'].fillna(50)
+    features['rsi'] = pd.Series(features['rsi'], index=df.index).fillna(50)
     features['rsi_normalized'] = (features['rsi'] - 50) / 50
     
     # Bollinger Bands
@@ -116,15 +131,19 @@ def engineer_features(df):
     bb_std_dev = df['Close'].rolling(20).std()
     bb_upper = bb_middle + (bb_std_dev * 2)
     bb_lower = bb_middle - (bb_std_dev * 2)
-    features['bb_position'] = (df['Close'] - bb_lower) / (bb_upper - bb_lower)
-    features['bb_position'] = features['bb_position'].fillna(0.5)
-    features['bb_width'] = ((bb_upper - bb_lower) / bb_middle).fillna(0)
+    
+    bb_range = bb_upper - bb_lower
+    features['bb_position'] = np.where(bb_range != 0, (df['Close'] - bb_lower) / bb_range, 0.5)
+    features['bb_width'] = np.where(bb_middle != 0, bb_range / bb_middle, 0)
     
     # === MOMENTUM FEATURES ===
     features['momentum_3'] = (df['Close'] / df['Close'].shift(3) - 1).fillna(0)
     features['momentum_5'] = (df['Close'] / df['Close'].shift(5) - 1).fillna(0)
     features['momentum_10'] = (df['Close'] / df['Close'].shift(10) - 1).fillna(0)
-    features['roc_5'] = ((df['Close'] - df['Close'].shift(5)) / df['Close'].shift(5) * 100).fillna(0)
+    
+    close_shifted = df['Close'].shift(5)
+    features['roc_5'] = np.where(close_shifted != 0, 
+                                (df['Close'] - close_shifted) / close_shifted * 100, 0)
     
     # === TIME-BASED FEATURES ===
     features['hour'] = df.index.hour
@@ -145,19 +164,32 @@ def engineer_features(df):
     # === MARKET STRUCTURE FEATURES ===
     features['recent_high'] = df['High'].rolling(20).max()
     features['recent_low'] = df['Low'].rolling(20).min()
-    features['distance_to_high'] = (features['recent_high'] - df['Close']) / df['Close']
-    features['distance_to_low'] = (df['Close'] - features['recent_low']) / df['Close']
+    
+    close_values = df['Close'].values
+    features['distance_to_high'] = np.where(close_values != 0, 
+                                          (features['recent_high'] - close_values) / close_values, 0)
+    features['distance_to_low'] = np.where(close_values != 0,
+                                         (close_values - features['recent_low']) / close_values, 0)
+    
     features['trend_strength'] = features['sma_cross'] - 1
     
     # === VOLATILITY REGIME ===
     vol_ma = features['volatility_20'].rolling(50).mean()
     features['vol_regime'] = (features['volatility_20'] > vol_ma).astype(int)
     
+    # === FINAL CLEANING ===
+    # Replace infinity values
+    features = features.replace([np.inf, -np.inf], np.nan)
+    
     # Fill NaN values
     features = features.fillna(method='ffill').fillna(0)
     
+    # Clip extreme values
+    numeric_columns = features.select_dtypes(include=[np.number]).columns
+    for col in numeric_columns:
+        features[col] = np.clip(features[col], -1e6, 1e6)
+    
     return features
-
 
 def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, Any]]:
     """Get advanced AI model prediction with filtering"""
@@ -197,7 +229,7 @@ def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, An
         
         # === VOLUME FILTERING ===
         volume_ratio = current_volume / volume_ma if volume_ma > 0 else 1
-        if volume_ratio < config.MIN_VOLUME_MULTIPLIER:
+        if volume_ratio < getattr(config, 'MIN_VOLUME_MULTIPLIER', 1.2):
             logger.info(f"Low volume detected ({volume_ratio:.2f}x). Reducing signal strength.")
             volume_penalty = 0.7
         else:
@@ -205,7 +237,7 @@ def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, An
         
         # === VOLATILITY FILTERING ===
         volatility_ratio = current_volatility / volatility_ma if volatility_ma > 0 else 1
-        if volatility_ratio < config.MIN_VOLATILITY_MULTIPLIER:
+        if volatility_ratio < getattr(config, 'MIN_VOLATILITY_MULTIPLIER', 1.1):
             logger.info(f"Low volatility detected ({volatility_ratio:.2f}x). Reducing signal strength.")
             volatility_penalty = 0.8
         else:
@@ -224,7 +256,7 @@ def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, An
         
         # Load metadata for label mapping
         try:
-            metadata = joblib.load(config.MODEL_METADATA_PATH)
+            metadata = joblib.load(getattr(config, 'MODEL_METADATA_PATH', 'model_metadata.pkl'))
             target_names = metadata.get('target_names', ['STRONG_SELL', 'SELL', 'HOLD', 'BUY', 'STRONG_BUY'])
         except:
             target_names = ['STRONG_SELL', 'SELL', 'HOLD', 'BUY', 'STRONG_BUY']
@@ -247,6 +279,7 @@ def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, An
         
     except Exception as e:
         logger.error(f"Error during AI prediction: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 def run_trading_logic():
@@ -296,7 +329,7 @@ def run_trading_logic():
                 'source': 'AI'
             }
             
-            if ai_signal['type'] != 'HOLD':
+            if ai_signal['type'] not in ['HOLD']:
                 final_signals.append(ai_signal)
         
         # Process and send signals
@@ -347,13 +380,34 @@ def signal_handler(signum, frame):
     global bot_running
     logger.info("Bot stopped manually by user (Ctrl+C).")
     bot_running = False
+    
+    # Cleanup operations
+    try:
+        # Stop any running processes
+        logger.info("Performing cleanup operations...")
+        
+        # Send shutdown notification
+        if config.TELEGRAM_ENABLED:
+            telegram_bot.send_status_update("Bot Shutdown", {
+                "Reason": "Manual stop by user",
+                "Time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "Status": "Graceful shutdown"
+            })
+        
+        logger.info("Cleanup completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+    
+    finally:
+        sys.exit(0)
 
 def main():
     """Main application entry point"""
     global bot_running
     
     try:
-        # Setup signal handlers
+        # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
         
@@ -364,9 +418,19 @@ def main():
         
         # Test Telegram connection
         if config.TELEGRAM_ENABLED:
-            telegram_bot.test_connection()
+            try:
+                logger.info("Telegram notifications enabled")
+                # Send startup notification
+                telegram_bot.send_status_update("Bot Started", {
+                    "Version": "FlowAI v2.1",
+                    "Symbol": config.SYMBOL,
+                    "Timeframe": config.TIMEFRAME,
+                    "AI Model": "Loaded" if ai_model else "Not Available",
+                    "Time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                })
+            except Exception as e:
+                logger.warning(f"Telegram setup issue: {e}")
         
-        # Run initial cycle
         logger.info("Running initial trading logic cycle on startup...")
         run_trading_logic()
         
@@ -378,16 +442,40 @@ def main():
         
         # Main loop
         while bot_running:
-            schedule.run_pending()
-            time.sleep(1)
-            
+            try:
+                schedule.run_pending()
+                time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Keyboard interrupt received")
+                break
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                
+                # Send error notification
+                try:
+                    telegram_bot.send_error_notification(str(e), "Main Loop")
+                except:
+                    pass
+                
+                # Continue running unless it's a critical error
+                time.sleep(5)
+                
     except KeyboardInterrupt:
         logger.info("Bot stopped manually by user (Ctrl+C).")
     except Exception as e:
         logger.error(f"Critical error in main loop: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Send critical error notification
+        try:
+            telegram_bot.send_error_notification(f"Critical Error: {str(e)}", "Main Application")
+        except:
+            pass
+            
     finally:
         logger.info("Bot shutdown.")
+        bot_running = False
 
 if __name__ == "__main__":
     main()
