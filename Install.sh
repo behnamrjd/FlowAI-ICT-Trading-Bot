@@ -193,7 +193,7 @@ install_build_dependencies() {
     
     # تعریف متغیر PYTHON_EXECUTABLE
     PYTHON_EXECUTABLE="python3"
-    PYTHON_MAJMIN=$($PYTHON_EXECUTABLE -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    PYTHON_MAJMIN=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     apt-get install -y python${PYTHON_MAJMIN}-dev
     
     apt-get install -y wget tar autoconf automake libtool pkg-config git
