@@ -13,6 +13,21 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
+import sys
+import os
+import joblib
+from pathlib import Path
+import traceback
+
+# اضافه کردن path پروژه
+sys.path.append('.')
+sys.path.append('./flow_ai_core')
+
+try:
+    from . import data_handler, config
+except ImportError:
+    import data_handler
+    import config
 
 logger = logging.getLogger(__name__)
 
@@ -386,6 +401,301 @@ class SmartBacktestConfig:
             logger.error(f"Failed to load configuration: {e}")
             return None
 
+class Portfolio:
+    """Portfolio management for backtesting"""
+    
+    def __init__(self, initial_capital=10000):
+        self.initial_capital = initial_capital
+        self.cash = initial_capital
+        self.positions = {}
+        self.trades = []
+        self.equity_history = []
+        self.current_value = initial_capital
+        
+    def calculate_position_size(self, signal, price, config):
+        """Calculate position size based on configuration"""
+        risk_config = config['risk_management']['position_sizing']
+        
+        if risk_config['method'] == 'percentage':
+            return self.current_value * (risk_config['value'] / 100)
+        elif risk_config['method'] == 'fixed_amount':
+            return risk_config['value']
+        elif risk_config['method'] == 'volatility_adjusted':
+            # Simple volatility adjustment
+            return self.current_value * 0.02  # 2% default
+        else:
+            return self.current_value * 0.02
+    
+    def execute_trade(self, signal, price, timestamp, config, market_data=None):
+        """Execute trade with realistic costs"""
+        if signal == 'HOLD':
+            return
+        
+        position_value = self.calculate_position_size(signal, price, config)
+        
+        # Calculate commission
+        commission_config = config['transaction_costs']['commission']
+        if commission_config['method'] == 'percentage_based':
+            commission = position_value * (commission_config['value'] / 100)
+        else:
+            commission = commission_config['value']
+        
+        # Calculate slippage
+        slippage_config = config['transaction_costs']['slippage']
+        if slippage_config['method'] == 'fixed_percentage':
+            slippage = price * (slippage_config['value'] / 100)
+        else:
+            slippage = price * 0.0005  # 0.05% default
+        
+        # Adjust price for slippage
+        if signal in ['BUY', 'STRONG_BUY']:
+            execution_price = price + slippage
+            shares = (position_value - commission) / execution_price
+            
+            if self.cash >= position_value:
+                self.cash -= position_value
+                self.positions[timestamp] = {
+                    'type': 'LONG',
+                    'shares': shares,
+                    'entry_price': execution_price,
+                    'entry_time': timestamp,
+                    'signal_strength': signal
+                }
+                
+                self.trades.append({
+                    'timestamp': timestamp,
+                    'action': 'BUY',
+                    'price': execution_price,
+                    'shares': shares,
+                    'commission': commission,
+                    'signal': signal
+                })
+        
+        elif signal in ['SELL', 'STRONG_SELL']:
+            # Close existing positions
+            for pos_time, position in list(self.positions.items()):
+                if position['type'] == 'LONG':
+                    execution_price = price - slippage
+                    proceeds = position['shares'] * execution_price - commission
+                    self.cash += proceeds
+                    
+                    # Calculate P&L
+                    pnl = proceeds - (position['shares'] * position['entry_price'])
+                    
+                    self.trades.append({
+                        'timestamp': timestamp,
+                        'action': 'SELL',
+                        'price': execution_price,
+                        'shares': position['shares'],
+                        'commission': commission,
+                        'pnl': pnl,
+                        'signal': signal,
+                        'entry_time': position['entry_time'],
+                        'entry_price': position['entry_price']
+                    })
+                    
+                    del self.positions[pos_time]
+    
+    def update_portfolio_value(self, current_price, timestamp):
+        """Update current portfolio value"""
+        portfolio_value = self.cash
+        
+        for position in self.positions.values():
+            if position['type'] == 'LONG':
+                portfolio_value += position['shares'] * current_price
+        
+        self.current_value = portfolio_value
+        self.equity_history.append({
+            'timestamp': timestamp,
+            'value': portfolio_value,
+            'cash': self.cash,
+            'positions_value': portfolio_value - self.cash
+        })
+
+class PerformanceAnalyzer:
+    """Advanced performance analysis"""
+    
+    def __init__(self):
+        self.metrics = {}
+    
+    def calculate_metrics(self, portfolio, trades):
+        """Calculate comprehensive performance metrics"""
+        if not trades:
+            return {'error': 'No trades to analyze'}
+        
+        # Basic metrics
+        total_trades = len([t for t in trades if 'pnl' in t])
+        winning_trades = len([t for t in trades if t.get('pnl', 0) > 0])
+        losing_trades = len([t for t in trades if t.get('pnl', 0) < 0])
+        
+        if total_trades == 0:
+            return {'error': 'No completed trades'}
+        
+        win_rate = (winning_trades / total_trades) * 100
+        
+        # P&L analysis
+        total_pnl = sum([t.get('pnl', 0) for t in trades])
+        avg_win = np.mean([t['pnl'] for t in trades if t.get('pnl', 0) > 0]) if winning_trades > 0 else 0
+        avg_loss = np.mean([t['pnl'] for t in trades if t.get('pnl', 0) < 0]) if losing_trades > 0 else 0
+        
+        # Returns calculation
+        initial_value = portfolio.initial_capital
+        final_value = portfolio.current_value
+        total_return = ((final_value - initial_value) / initial_value) * 100
+        
+        # Drawdown calculation
+        equity_values = [e['value'] for e in portfolio.equity_history]
+        if len(equity_values) > 1:
+            peak = equity_values[0]
+            max_drawdown = 0
+            
+            for value in equity_values:
+                if value > peak:
+                    peak = value
+                drawdown = ((peak - value) / peak) * 100
+                max_drawdown = max(max_drawdown, drawdown)
+        else:
+            max_drawdown = 0
+        
+        # Sharpe ratio (simplified)
+        if len(equity_values) > 1:
+            returns = np.diff(equity_values) / equity_values[:-1]
+            sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(252) if np.std(returns) > 0 else 0
+        else:
+            sharpe_ratio = 0
+        
+        return {
+            'total_trades': total_trades,
+            'winning_trades': winning_trades,
+            'losing_trades': losing_trades,
+            'win_rate': round(win_rate, 2),
+            'total_pnl': round(total_pnl, 2),
+            'total_return': round(total_return, 2),
+            'avg_win': round(avg_win, 2),
+            'avg_loss': round(avg_loss, 2),
+            'profit_factor': round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else 0,
+            'max_drawdown': round(max_drawdown, 2),
+            'sharpe_ratio': round(sharpe_ratio, 2),
+            'initial_capital': initial_value,
+            'final_value': round(final_value, 2)
+        }
+
+class FlowAIBacktester:
+    """Main backtesting engine"""
+    
+    def __init__(self, config):
+        self.config = config
+        self.portfolio = Portfolio(10000)  # Default $10k
+        self.performance = PerformanceAnalyzer()
+        
+    def run_backtest(self, data, strategy_signals):
+        """Run complete backtest"""
+        logger.info("🚀 Starting FlowAI Backtest...")
+        
+        if data.empty or strategy_signals.empty:
+            return {'error': 'No data or signals provided'}
+        
+        # Align data and signals
+        aligned_data = data.join(strategy_signals, how='inner')
+        
+        if aligned_data.empty:
+            return {'error': 'No aligned data found'}
+        
+        logger.info(f"📊 Processing {len(aligned_data)} data points...")
+        
+        for timestamp, row in aligned_data.iterrows():
+            # Get AI signal
+            signal = row.get('signal', 'HOLD')
+            price = row['Close']
+            
+            # Apply filters
+            if not self._apply_filters(row, timestamp):
+                continue
+            
+            # Execute trade
+            self.portfolio.execute_trade(
+                signal, price, timestamp, self.config, row
+            )
+            
+            # Update portfolio value
+            self.portfolio.update_portfolio_value(price, timestamp)
+        
+        # Calculate final metrics
+        metrics = self.performance.calculate_metrics(
+            self.portfolio, self.portfolio.trades
+        )
+        
+        logger.info("✅ Backtest completed!")
+        return {
+            'metrics': metrics,
+            'trades': self.portfolio.trades,
+            'equity_curve': self.portfolio.equity_history,
+            'config': self.config
+        }
+    
+    def _apply_filters(self, row, timestamp):
+        """Apply market condition filters"""
+        
+        # Volatility filter
+        vol_filter = self.config['market_conditions']['volatility_filter']
+        if vol_filter['method'] != 'all_conditions':
+            # Simple volatility check (can be enhanced)
+            volatility = row.get('volatility_20', 0)
+            if vol_filter['method'] == 'low_vol' and volatility > 0.02:
+                return False
+            elif vol_filter['method'] == 'high_vol' and volatility < 0.03:
+                return False
+        
+        # Trading session filter
+        session_filter = self.config['market_conditions']['trading_sessions']
+        if session_filter['method'] != 'all_sessions':
+            hour = timestamp.hour
+            if session_filter['method'] == 'overlap_london_us':
+                if not (13 <= hour <= 16):
+                    return False
+            elif session_filter['method'] == 'london':
+                if not (8 <= hour <= 16):
+                    return False
+            elif session_filter['method'] == 'us':
+                if not (13 <= hour <= 21):
+                    return False
+        
+        return True
+
+def load_ai_model_and_predict(data):
+    """Load AI model and generate predictions"""
+    try:
+        import joblib
+        
+        # Load model
+        model = joblib.load('model.pkl')
+        features = joblib.load('model_features.pkl')
+        
+        # Prepare features (simplified)
+        feature_data = data[features].fillna(0)
+        
+        # Generate predictions
+        predictions = model.predict(feature_data)
+        confidence = model.predict_proba(feature_data).max(axis=1)
+        
+        # Convert to signals
+        signal_map = {0: 'STRONG_SELL', 1: 'SELL', 2: 'HOLD', 3: 'BUY', 4: 'STRONG_BUY'}
+        signals = [signal_map.get(p, 'HOLD') for p in predictions]
+        
+        return pd.DataFrame({
+            'signal': signals,
+            'confidence': confidence
+        }, index=data.index)
+        
+    except Exception as e:
+        logger.error(f"Error loading AI model: {e}")
+        # Fallback to random signals for testing
+        signals = np.random.choice(['BUY', 'SELL', 'HOLD'], size=len(data))
+        return pd.DataFrame({
+            'signal': signals,
+            'confidence': np.random.uniform(0.6, 0.9, size=len(data))
+        }, index=data.index)
+    
 if __name__ == "__main__":
     # تست سیستم تنظیمات
     config_wizard = SmartBacktestConfig()

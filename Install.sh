@@ -147,6 +147,288 @@ EOF
     pause_with_message
 }
 
+run_custom_backtest() {
+    print_step "Running Custom Backtest"
+    
+    echo -e "${CYAN}📈 اجرای بک‌تست سفارشی FlowAI${NC}"
+    echo ""
+    
+    # بررسی وجود فایل تنظیمات
+    if [[ ! -f "$PROJECT_DIR/advanced_backtest_config.json" ]]; then
+        echo -e "${YELLOW}⚠️ فایل تنظیمات یافت نشد. ابتدا تنظیمات را انجام دهید.${NC}"
+        echo ""
+        read -p "آیا می‌خواهید تنظیمات را انجام دهید؟ (y/N): " setup_config
+        if [[ $setup_config =~ ^[Yy]$ ]]; then
+            configure_advanced_backtest
+            return
+        else
+            return
+        fi
+    fi
+    
+    cd "$PROJECT_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    echo -e "${WHITE}🚀 شروع بک‌تست با تنظیمات شما...${NC}"
+    echo ""
+    
+    python << 'EOF'
+import sys
+sys.path.append('.')
+
+from flow_ai_core.backtest_engine import SmartBacktestConfig, FlowAIBacktester, load_ai_model_and_predict
+from flow_ai_core import data_handler
+import json
+from datetime import datetime, timedelta
+
+try:
+    # بارگذاری تنظیمات
+    with open('advanced_backtest_config.json', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    print("📋 تنظیمات بارگذاری شد")
+    
+    # محاسبه بازه زمانی
+    duration_days = config['backtest_period']['duration']['value']
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=duration_days)
+    
+    print(f"📅 بازه بک‌تست: {start_date.date()} تا {end_date.date()}")
+    print("📊 دریافت داده‌های تاریخی...")
+    
+    # دریافت داده‌ها
+    symbol = "GC=F"  # طلا
+    data = data_handler.get_processed_data(symbol, "1h", limit=duration_days * 24)
+    
+    if data.empty:
+        print("❌ خطا: داده‌ای دریافت نشد")
+        exit(1)
+    
+    print(f"✅ {len(data)} کندل دریافت شد")
+    print("🤖 تولید سیگنال‌های AI...")
+    
+    # تولید سیگنال‌ها
+    signals = load_ai_model_and_predict(data)
+    
+    print(f"✅ {len(signals)} سیگنال تولید شد")
+    print("⚡ اجرای بک‌تست...")
+    
+    # اجرای بک‌تست
+    backtester = FlowAIBacktester(config)
+    results = backtester.run_backtest(data, signals)
+    
+    if 'error' in results:
+        print(f"❌ خطا در بک‌تست: {results['error']}")
+        exit(1)
+    
+    # نمایش نتایج
+    metrics = results['metrics']
+    
+    print("\n" + "=" * 60)
+    print("📊 نتایج بک‌تست FlowAI")
+    print("=" * 60)
+    
+    print(f"\n💰 عملکرد مالی:")
+    print(f"  • سرمایه اولیه: ${metrics['initial_capital']:,.2f}")
+    print(f"  • سرمایه نهایی: ${metrics['final_value']:,.2f}")
+    print(f"  • بازدهی کل: {metrics['total_return']:.2f}%")
+    print(f"  • سود/زیان کل: ${metrics['total_pnl']:,.2f}")
+    
+    print(f"\n📈 آمار معاملات:")
+    print(f"  • تعداد کل معاملات: {metrics['total_trades']}")
+    print(f"  • معاملات سودآور: {metrics['winning_trades']}")
+    print(f"  • معاملات زیان‌ده: {metrics['losing_trades']}")
+    print(f"  • نرخ موفقیت: {metrics['win_rate']:.2f}%")
+    
+    print(f"\n⚖️ تحلیل ریسک:")
+    print(f"  • حداکثر افت: {metrics['max_drawdown']:.2f}%")
+    print(f"  • نسبت شارپ: {metrics['sharpe_ratio']:.2f}")
+    print(f"  • ضریب سود: {metrics['profit_factor']:.2f}")
+    
+    # ذخیره نتایج
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_file = f"backtest_results_{timestamp}.json"
+    
+    with open(results_file, 'w', encoding='utf-8') as f:
+        # Convert datetime objects to strings for JSON serialization
+        serializable_results = {
+            'metrics': metrics,
+            'config': config,
+            'timestamp': timestamp,
+            'symbol': symbol,
+            'data_points': len(data)
+        }
+        json.dump(serializable_results, f, indent=2, ensure_ascii=False)
+    
+    print(f"\n📁 نتایج ذخیره شد: {results_file}")
+    print("=" * 60)
+
+except Exception as e:
+    print(f"❌ خطا در اجرای بک‌تست: {e}")
+    import traceback
+    traceback.print_exc()
+EOF
+    
+    echo ""
+    pause_with_message
+}
+
+view_backtest_results() {
+    print_step "View Backtest Results"
+    
+    echo -e "${CYAN}📊 نمایش نتایج بک‌تست${NC}"
+    echo ""
+    
+    cd "$PROJECT_DIR"
+    
+    # جستجوی فایل‌های نتایج
+    echo -e "${WHITE}🔍 جستجوی فایل‌های نتایج...${NC}"
+    
+    if ls backtest_results_*.json 1> /dev/null 2>&1; then
+        echo -e "${GREEN}📁 فایل‌های نتایج موجود:${NC}"
+        echo ""
+        
+        # نمایش لیست فایل‌ها
+        local files=(backtest_results_*.json)
+        for i in "${!files[@]}"; do
+            local file="${files[$i]}"
+            local date=$(echo "$file" | grep -o '[0-9]\{8\}_[0-9]\{6\}')
+            local formatted_date=$(echo "$date" | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)_\([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3 \4:\5:\6/')
+            echo -e "${WHITE}$((i+1)).${NC} $formatted_date"
+        done
+        
+        echo ""
+        read -p "انتخاب فایل (شماره): " file_choice
+        
+        if [[ "$file_choice" =~ ^[0-9]+$ ]] && [ "$file_choice" -ge 1 ] && [ "$file_choice" -le "${#files[@]}" ]; then
+            local selected_file="${files[$((file_choice-1))]}"
+            
+            echo -e "${CYAN}📊 نمایش نتایج: $selected_file${NC}"
+            echo ""
+            
+            python << EOF
+import json
+import sys
+
+try:
+    with open('$selected_file', 'r', encoding='utf-8') as f:
+        results = json.load(f)
+    
+    metrics = results['metrics']
+    config = results['config']
+    
+    print("=" * 60)
+    print("📊 گزارش تفصیلی بک‌تست FlowAI")
+    print("=" * 60)
+    
+    print(f"\n📅 اطلاعات کلی:")
+    print(f"  • زمان اجرا: {results['timestamp']}")
+    print(f"  • نماد: {results['symbol']}")
+    print(f"  • تعداد داده: {results['data_points']}")
+    
+    print(f"\n💰 عملکرد مالی:")
+    print(f"  • سرمایه اولیه: \${metrics['initial_capital']:,.2f}")
+    print(f"  • سرمایه نهایی: \${metrics['final_value']:,.2f}")
+    print(f"  • بازدهی کل: {metrics['total_return']:.2f}%")
+    print(f"  • سود/زیان کل: \${metrics['total_pnl']:,.2f}")
+    
+    print(f"\n📈 آمار معاملات:")
+    print(f"  • تعداد کل معاملات: {metrics['total_trades']}")
+    print(f"  • معاملات سودآور: {metrics['winning_trades']}")
+    print(f"  • معاملات زیان‌ده: {metrics['losing_trades']}")
+    print(f"  • نرخ موفقیت: {metrics['win_rate']:.2f}%")
+    print(f"  • میانگین سود: \${metrics['avg_win']:,.2f}")
+    print(f"  • میانگین زیان: \${metrics['avg_loss']:,.2f}")
+    
+    print(f"\n⚖️ تحلیل ریسک:")
+    print(f"  • حداکثر افت: {metrics['max_drawdown']:.2f}%")
+    print(f"  • نسبت شارپ: {metrics['sharpe_ratio']:.2f}")
+    print(f"  • ضریب سود: {metrics['profit_factor']:.2f}")
+    
+    print(f"\n⚙️ تنظیمات استفاده شده:")
+    risk = config['risk_management']
+    print(f"  • سایز معامله: {risk['position_sizing']['description']}")
+    print(f"  • حد ضرر: {risk['stop_loss']['description']}")
+    
+    market = config['market_conditions']
+    print(f"  • ساعات معاملاتی: {market['trading_sessions']['description']}")
+    
+    print("=" * 60)
+
+except Exception as e:
+    print(f"❌ خطا در خواندن فایل: {e}")
+EOF
+        else
+            echo -e "${RED}❌ انتخاب نامعتبر!${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠️ هیچ فایل نتایجی یافت نشد.${NC}"
+        echo -e "${WHITE}ابتدا یک بک‌تست اجرا کنید.${NC}"
+    fi
+    
+    echo ""
+    pause_with_message
+}
+
+scheduled_backtest_manager() {
+    print_step "Scheduled Backtest Manager"
+    
+    echo -e "${CYAN}🔄 مدیریت بک‌تست‌های زمان‌بندی شده${NC}"
+    echo ""
+    
+    echo -e "${WHITE}گزینه‌های موجود:${NC}"
+    echo -e "${WHITE}1.${NC} 📅 نمایش برنامه فعلی"
+    echo -e "${WHITE}2.${NC} ⚙️ تنظیم برنامه جدید"
+    echo -e "${WHITE}3.${NC} ⏹️ غیرفعال کردن برنامه"
+    echo -e "${WHITE}4.${NC} 🔙 بازگشت"
+    echo ""
+    
+    read -p "انتخاب شما (1-4): " schedule_choice
+    
+    case $schedule_choice in
+        1)
+            echo -e "${CYAN}📅 برنامه فعلی:${NC}"
+            if [[ -f "$PROJECT_DIR/advanced_backtest_config.json" ]]; then
+                python << 'EOF'
+import json
+try:
+    with open('advanced_backtest_config.json', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    frequency = config['backtest_period']['frequency']
+    print(f"🔄 تکرار: {frequency['description']}")
+    print(f"📊 آخرین اجرا: در دسترس نیست")
+    print(f"⏰ اجرای بعدی: بر اساس تنظیمات")
+    
+except Exception as e:
+    print("❌ خطا در خواندن تنظیمات")
+EOF
+            else
+                echo -e "${YELLOW}⚠️ هیچ برنامه‌ای تنظیم نشده است.${NC}"
+            fi
+            ;;
+        2)
+            echo -e "${CYAN}⚙️ تنظیم برنامه جدید${NC}"
+            echo -e "${WHITE}برای تنظیم برنامه، ابتدا تنظیمات بک‌تست را انجام دهید.${NC}"
+            configure_advanced_backtest
+            ;;
+        3)
+            echo -e "${YELLOW}⏹️ غیرفعال کردن برنامه${NC}"
+            echo -e "${WHITE}این ویژگی در نسخه آینده اضافه خواهد شد.${NC}"
+            ;;
+        4)
+            return
+            ;;
+        *)
+            echo -e "${RED}❌ انتخاب نامعتبر!${NC}"
+            ;;
+    esac
+    
+    echo ""
+    pause_with_message
+}
+
+
 confirm_action() {
     local message=$1
     echo -e "${YELLOW}$message (y/N): ${NC}"
