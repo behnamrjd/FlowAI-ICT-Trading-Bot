@@ -252,20 +252,20 @@ class RobustYahooFetcher:
                     logger.info(f"Retry {attempt + 1} for {symbol}: waiting {smart_delay:.1f} seconds")
                     time.sleep(smart_delay)
                 
-                logger.info(f"Fetching {symbol} data (attempt {attempt + 1}/{max_retries})")
-                
-                # Use yfinance with conservative parameters
-                    data = yf.download(
-                    symbol,
-                    period=period,
-                    interval=interval,
-                    progress=False,
-                    threads=False,
-                    auto_adjust=True,
-                    actions=False,
-                    timeout=30,
-                    group_by=None  # اضافه شده - جلوگیری از MultiIndex
-                )
+            logger.info(f"Fetching {symbol} data (attempt {attempt + 1}/{max_retries})")
+            
+            # Use yfinance with conservative parameters
+            data = yf.download(
+                symbol,
+                period=period,
+                interval=interval,
+                progress=False,
+                threads=False,
+                auto_adjust=True,
+                actions=False,
+                timeout=30
+            )
+
 
 # ATR with safe division
 high_low = df['High'] - df['Low']
