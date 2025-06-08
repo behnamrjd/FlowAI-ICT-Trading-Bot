@@ -2,6 +2,8 @@
 """
 FlowAI ICT Trading Bot - Advanced AI Model Trainer v3.0
 Professional trading model with SMOTE, adaptive thresholds, and class balancing
+Version: 3.0 - Fixed All Issues
+Author: Behnam RJD
 """
 
 import pandas as pd
@@ -59,31 +61,24 @@ class AdvancedFeatureEngineer:
         features['volatility_ratio'] = (features['volatility_5'] / features['volatility_20']).fillna(1)
         features['volatility_regime'] = (features['volatility_20'] / features['volatility_50']).fillna(1)
         
-# ATR with safe division
-high_low = df['High'] - df['Low']
-high_close = np.abs(df['High'] - df['Close'].shift())
-low_close = np.abs(df['Low'] - df['Close'].shift())
-true_range = np.maximum(high_low, np.maximum(high_close, low_close))
-
-# Fix true_range if it's a DataFrame
-if isinstance(true_range, pd.DataFrame):
-    true_range = true_range.iloc[:, 0]
-
-features['atr'] = true_range.rolling(14).mean().fillna(0)
-
-# اصلاح ATR normalized
-close_values = df['Close']
-if isinstance(close_values, pd.DataFrame):
-    close_values = close_values.iloc[:, 0]
-
-features['atr_normalized'] = features['atr'] / close_values
-
-
-        # Safe ATR ratio
-        atr_values = features['atr'].values
-        atr_ratio = np.where(atr_values != 0, true_range / atr_values, 1.0)
-        features['atr_ratio'] = pd.Series(atr_ratio, index=df.index).fillna(1)
-
+        # ATR with safe division - اصلاح شده
+        high_low = df['High'] - df['Low']
+        high_close = np.abs(df['High'] - df['Close'].shift())
+        low_close = np.abs(df['Low'] - df['Close'].shift())
+        true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+        
+        # Fix true_range if it's a DataFrame
+        if isinstance(true_range, pd.DataFrame):
+            true_range = true_range.iloc[:, 0]
+        
+        features['atr'] = true_range.rolling(14).mean().fillna(0)
+        
+        # اصلاح ATR normalized
+        close_values = df['Close']
+        if isinstance(close_values, pd.DataFrame):
+            close_values = close_values.iloc[:, 0]
+        
+        features['atr_normalized'] = features['atr'] / close_values
         
         # Safe ATR ratio
         atr_values = features['atr'].values
@@ -424,7 +419,7 @@ def train_advanced_ai_model():
         timeframe = config.TIMEFRAME
         
         # Get more data for training
-        df = data_handler.fetch_ohlcv_data(symbol, timeframe, limit=2000)
+        df = data_handler.get_processed_data(symbol, timeframe, limit=2000)
         
         if df.empty:
             logger.error("❌ No data available for training!")
