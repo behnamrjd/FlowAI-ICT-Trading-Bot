@@ -65,7 +65,7 @@ class AdvancedFeatureEngineer:
         low_close = np.abs(df['Low'] - df['Close'].shift())
         true_range = np.maximum(high_low, np.maximum(high_close, low_close))
         features['atr'] = true_range.rolling(14).mean().fillna(0)
-        features['atr_normalized'] = features['atr'] / df['Close']
+        features['atr_normalized'] = features['atr'] / df['Close'].squeeze()
         
         # Safe ATR ratio
         atr_values = features['atr'].values
