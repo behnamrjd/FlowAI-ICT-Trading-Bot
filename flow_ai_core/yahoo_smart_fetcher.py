@@ -267,22 +267,18 @@ class RobustYahooFetcher:
                     group_by=None  # اضافه شده - جلوگیری از MultiIndex
                 )
 
-# اصلاح MultiIndex columns اگر وجود داشت
-if isinstance(data.columns, pd.MultiIndex):
-    data.columns = data.columns.droplevel(0)
+# ATR with safe division
+high_low = df['High'] - df['Low']
+high_close = np.abs(df['High'] - df['Close'].shift())
+low_close = np.abs(df['Low'] - df['Close'].shift())
+true_range = np.maximum(high_low, np.maximum(high_close, low_close))
 
-if data is not None and not data.empty:
-    # Validate data quality
-    if self._validate_data(data):
-        self.failed_attempts = 0
-        self.last_request_time = time.time()
-        self.cache_manager.save_to_cache(data, symbol, period, interval)
-        
-        logger.info(f"✅ Successfully fetched {len(data)} records for {symbol}")
-        return data
-    else:
-        logger.warning(f"Invalid data quality for {symbol}")
-        continue
+# Fix true_range if it's a DataFrame
+if isinstance(true_range, pd.DataFrame):
+    true_range = true_range.iloc[:, 0]
+
+features['atr'] = true_range.rolling(14).mean().fillna(0)
+
 
                 else:
                     logger.warning(f"⚠️ Empty data received for {symbol}")
