@@ -208,16 +208,22 @@ class RobustYahooFetcher:
                 
                 logger.info(f"Fetching {symbol} data (attempt {attempt + 1}/{max_retries})")
                 
-                data = yf.download(
-                    symbol,
-                    period=period,
-                    interval=interval,
-                    progress=False,
-                    threads=False,
-                    auto_adjust=True,
-                    actions=False,
-                    timeout=30
-                )
+data = yf.download(
+    symbol,
+    period=period,
+    interval=interval,
+    progress=False,
+    threads=False,
+    auto_adjust=True,
+    actions=False,
+    timeout=30,
+    group_by=None  # اضافه کردن این خط
+)
+
+# اضافه کردن این بخش بعد از yf.download:
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.droplevel(0)
+
                 
                 if data is not None and not data.empty:
                     if self._validate_data(data):
