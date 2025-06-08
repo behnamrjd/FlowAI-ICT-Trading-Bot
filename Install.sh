@@ -836,16 +836,36 @@ toggle_debug_mode() {
 api_testing_utilities() {
     print_step "API Testing Utilities"
     
-    echo -e "${YELLOW}🧪 Testing APIs...${NC}"
+    echo -e "${YELLOW}🧪 Testing APIs with Smart Fetcher...${NC}"
     echo ""
     
-    # Test Yahoo Finance API
-    echo -e "${CYAN}Testing Yahoo Finance API...${NC}"
-    if curl -s "https://query1.finance.yahoo.com/v8/finance/chart/GC=F" | grep -q "chart"; then
-        print_success "Yahoo Finance API: Working"
-    else
-        print_error "Yahoo Finance API: Failed"
-    fi
+    cd "$PROJECT_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    # Test Yahoo Finance API with smart fetcher
+    echo -e "${CYAN}Testing Yahoo Finance Smart Fetcher...${NC}"
+    python << 'EOF'
+import sys
+sys.path.append('.')
+
+try:
+    from flow_ai_core.yahoo_smart_fetcher import fetch_yahoo_data_smart
+    
+    print("🔍 Testing smart Yahoo Finance fetcher...")
+    data = fetch_yahoo_data_smart("GC=F", period="1d", interval="1h")
+    
+    if data is not None and not data.empty:
+        print(f"✅ Yahoo Finance Smart Fetcher: Working ({len(data)} records)")
+        print(f"   Latest price: ${data['Close'].iloc[-1]:.2f}")
+        print(f"   Data range: {data.index[0]} to {data.index[-1]}")
+    else:
+        print("❌ Yahoo Finance Smart Fetcher: No data received")
+        
+except Exception as e:
+    print(f"❌ Yahoo Finance Smart Fetcher: Error - {e}")
+EOF
+    
+    echo ""
     
     # Test Telegram API (if configured)
     if [[ -f "$CONFIG_FILE" ]] && grep -q "TELEGRAM_ENABLED=True" "$CONFIG_FILE"; then
@@ -864,11 +884,10 @@ api_testing_utilities() {
         print_info "Telegram API: Disabled"
     fi
     
-    # Test Python imports
-    echo -e "${CYAN}Testing Python dependencies...${NC}"
-    cd "$PROJECT_DIR"
-    source "$VENV_DIR/bin/activate"
+    echo ""
     
+    # Test Python dependencies
+    echo -e "${CYAN}Testing Python dependencies...${NC}"
     local deps=("pandas" "numpy" "sklearn" "yfinance" "ta" "requests" "imblearn")
     for dep in "${deps[@]}"; do
         if python -c "import $dep" 2>/dev/null; then

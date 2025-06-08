@@ -1,295 +1,622 @@
+#!/usr/bin/env python3
 """
-FlowAI ICT Trading Bot Data Handler
-Manages data fetching, processing, and caching from various sources
+FlowAI ICT Trading Bot - Data Handler v3.0
+Advanced data fetching and processing with smart Yahoo Finance integration
+Author: Behnam RJD
 """
 
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import ta
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Tuple, Any
-import time
-import os
+from typing import Dict, List, Optional, Tuple
+import warnings
+warnings.filterwarnings('ignore')
+
+# Import smart fetcher
+from .yahoo_smart_fetcher import fetch_yahoo_data_smart, reset_yahoo_fetcher, fetch_gold_data
 from . import config
-from . import utils
 
-# Setup logger
-logger = logging.getLogger("FlowAI_Bot")
+# Setup logging
+logger = logging.getLogger(__name__)
 
-class DataHandler:
+def fetch_ohlcv_data(symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
     """
-    Handles all data operations for the trading bot
-    """
+    Fetch OHLCV data using smart Yahoo Finance fetcher with anti-rate-limiting
     
-    def __init__(self):
-        self.cache = {}
-        self.cache_duration = 300  # 5 minutes cache
+    Args:
+        symbol: Trading symbol (e.g., 'GC=F' for Gold)
+        timeframe: Timeframe (1m, 5m, 15m, 30m, 1h, 1d, 1wk, 1mo)
+        limit: Maximum number of candles to fetch
+    
+    Returns:
+        DataFrame with OHLCV data
+    """
+    try:
+        logger.info(f"Fetching OHLCV: {symbol} ({timeframe}), {limit} candles from yahoo...")
         
-    def fetch_ohlcv_data(self, symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
-        """
-        Fetch OHLCV data from Yahoo Finance
-        """
-        try:
-            cache_key = f"{symbol}_{timeframe}_{limit}"
-            current_time = time.time()
-            
-            # Check cache
-            if cache_key in self.cache:
-                cached_data, cache_time = self.cache[cache_key]
-                if current_time - cache_time < self.cache_duration:
-                    logger.debug(f"Using cached data for {symbol} ({timeframe})")
-                    return cached_data
-            
-            logger.info(f"Fetching OHLCV: {symbol} ({timeframe}), {limit} candles from yahoo...")
-            
-            # Map timeframe to yfinance format
-            interval_map = {
-                '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
-                '1h': '1h', '2h': '2h', '4h': '4h',
-                '1d': '1d', '1w': '1wk', '1M': '1mo'
-            }
-            
-            yf_interval = interval_map.get(timeframe, '1h')
-            
-            # Calculate period based on timeframe and limit
-            if timeframe in ['1m', '5m', '15m', '30m']:
-                period = f"{min(limit * self._get_minutes(timeframe), 7*24*60)}m"
-            elif timeframe in ['1h', '2h', '4h']:
-                days = min(limit * self._get_hours(timeframe) // 24 + 1, 730)
-                period = f"{days}d"
-            else:
-                period = "2y"
-            
-            # Fetch data from yfinance
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period=period, interval=yf_interval)
-            
-            if data.empty:
-                logger.error(f"No data received for {symbol}")
-                return pd.DataFrame()
-            
-            # Standardize column names
-            data = data.rename(columns={
-                'Open': 'Open',
-                'High': 'High', 
-                'Low': 'Low',
-                'Close': 'Close',
-                'Volume': 'Volume'
-            })
-            
-            # Ensure we have the required columns
-            required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-            for col in required_columns:
-                if col not in data.columns:
-                    logger.warning(f"Missing column {col}, filling with Close price")
-                    data[col] = data['Close'] if 'Close' in data.columns else 0
-            
-            # Clean data
-            data = data[required_columns].copy()
-            data = data.dropna()
-            
-            # Limit to requested number of candles
-            if len(data) > limit:
-                data = data.tail(limit)
-            
-            # Add technical indicators
-            data = self._add_basic_indicators(data)
-            
-            # Cache the data
-            self.cache[cache_key] = (data.copy(), current_time)
-            
-            logger.info(f"Fetched {len(data)} candles from Yahoo Finance for {symbol}")
-            return data
-            
-        except Exception as e:
-            logger.error(f"Error fetching data for {symbol}: {e}")
+        # Map timeframe to period for Yahoo Finance
+        period_map = {
+            '1m': '7d',      # 1 minute data - max 7 days
+            '2m': '60d',     # 2 minute data - max 60 days  
+            '5m': '60d',     # 5 minute data - max 60 days
+            '15m': '60d',    # 15 minute data - max 60 days
+            '30m': '60d',    # 30 minute data - max 60 days
+            '1h': '730d',    # 1 hour data - max 730 days (2 years)
+            '1d': '5y',      # 1 day data - max 5 years
+            '1wk': '10y',    # 1 week data - max 10 years
+            '1mo': '20y'     # 1 month data - max 20 years
+        }
+        
+        period = period_map.get(timeframe, '730d')
+        
+        # Use smart fetcher to avoid rate limiting
+        df = fetch_yahoo_data_smart(symbol, period=period, interval=timeframe)
+        
+        if df is None or df.empty:
+            logger.error(f"No data received for {symbol}")
             return pd.DataFrame()
-    
-    def _get_minutes(self, timeframe: str) -> int:
-        """Get minutes for timeframe"""
-        mapping = {'1m': 1, '5m': 5, '15m': 15, '30m': 30}
-        return mapping.get(timeframe, 60)
-    
-    def _get_hours(self, timeframe: str) -> int:
-        """Get hours for timeframe"""
-        mapping = {'1h': 1, '2h': 2, '4h': 4}
-        return mapping.get(timeframe, 1)
-    
-    def _add_basic_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add basic technical indicators to the dataframe
-        """
+        
+        # Process and clean data
+        df = process_raw_data(df)
+        
+        # Limit to requested number of candles
+        if len(df) > limit:
+            df = df.tail(limit)
+        
+        logger.info(f"Fetched {len(df)} candles from Yahoo Finance for {symbol}")
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error fetching OHLCV data for {symbol}: {e}")
+        
+        # Try resetting fetcher on persistent errors
         try:
-            # Simple Moving Averages
-            df['SMA_10'] = df['Close'].rolling(window=10).mean()
-            df['SMA_20'] = df['Close'].rolling(window=20).mean()
-            df['SMA_50'] = df['Close'].rolling(window=50).mean()
+            reset_yahoo_fetcher()
+            logger.info("Reset Yahoo fetcher due to persistent errors")
+        except Exception as reset_error:
+            logger.warning(f"Failed to reset Yahoo fetcher: {reset_error}")
             
-            # RSI
-            df['RSI'] = self._calculate_rsi(df['Close'], period=14)
-            
-            # Fill NaN values
-            df = df.fillna(method='ffill').fillna(0)
-            
-            return df
-            
-        except Exception as e:
-            logger.error(f"Error adding basic indicators: {e}")
-            return df
+        return pd.DataFrame()
+
+def process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Process raw Yahoo Finance data to standard format
     
-    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
-        """
-        Calculate RSI (Relative Strength Index)
-        """
-        try:
-            delta = prices.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            return rsi.fillna(50)
-        except Exception:
-            return pd.Series(index=prices.index, data=50.0)
+    Args:
+        df: Raw DataFrame from Yahoo Finance
     
-    def get_processed_data(self, symbol: str, timeframe: str, limit: int = None) -> pd.DataFrame:
-        """
-        Get processed data ready for analysis
-        """
-        if limit is None:
-            limit = config.CANDLE_LIMIT
+    Returns:
+        Processed DataFrame with standard columns
+    """
+    try:
+        # Reset index to get datetime as column
+        if df.index.name in ['Date', 'Datetime']:
+            df = df.reset_index()
+        
+        # Standardize column names
+        column_mapping = {
+            'Date': 'timestamp',
+            'Datetime': 'timestamp',
+            'Open': 'Open',
+            'High': 'High', 
+            'Low': 'Low',
+            'Close': 'Close',
+            'Adj Close': 'Adj_Close',
+            'Volume': 'Volume'
+        }
+        
+        # Rename columns if they exist
+        for old_name, new_name in column_mapping.items():
+            if old_name in df.columns:
+                df = df.rename(columns={old_name: new_name})
+        
+        # Set timestamp as index if it exists
+        if 'timestamp' in df.columns:
+            df.set_index('timestamp', inplace=True)
+        
+        # Ensure we have required columns
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            logger.warning(f"Missing columns: {missing_columns}")
+            # Fill missing columns with Close price (except Volume)
+            for col in missing_columns:
+                if col == 'Volume':
+                    df[col] = 0
+                else:
+                    df[col] = df['Close'] if 'Close' in df.columns else 0
+        
+        # Clean data
+        df = clean_ohlcv_data(df)
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error processing raw data: {e}")
+        return df
+
+def clean_ohlcv_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Clean OHLCV data by removing invalid values and filling gaps
+    
+    Args:
+        df: DataFrame with OHLCV data
+    
+    Returns:
+        Cleaned DataFrame
+    """
+    try:
+        if df.empty:
+            return df
+        
+        # Remove rows with all NaN values
+        df = df.dropna(how='all')
+        
+        # Forward fill missing values
+        df = df.fillna(method='ffill')
+        
+        # Remove rows where OHLC values are zero or negative
+        numeric_columns = ['Open', 'High', 'Low', 'Close']
+        for col in numeric_columns:
+            if col in df.columns:
+                df = df[df[col] > 0]
+        
+        # Ensure High >= Low, High >= Open, High >= Close, Low <= Open, Low <= Close
+        if all(col in df.columns for col in ['Open', 'High', 'Low', 'Close']):
+            # Fix impossible OHLC relationships
+            df['High'] = df[['Open', 'High', 'Low', 'Close']].max(axis=1)
+            df['Low'] = df[['Open', 'High', 'Low', 'Close']].min(axis=1)
+        
+        # Remove duplicate timestamps
+        df = df[~df.index.duplicated(keep='last')]
+        
+        # Sort by timestamp
+        df = df.sort_index()
+        
+        logger.debug(f"Cleaned data: {len(df)} valid candles")
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error cleaning OHLCV data: {e}")
+        return df
+
+def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add technical indicators to OHLCV data
+    
+    Args:
+        df: DataFrame with OHLCV data
+    
+    Returns:
+        DataFrame with added technical indicators
+    """
+    try:
+        if df.empty or len(df) < 20:
+            logger.warning("Insufficient data for technical indicators")
+            return df
+        
+        # RSI
+        df['RSI'] = ta.momentum.RSIIndicator(
+            close=df['Close'], 
+            window=config.RSI_PERIOD
+        ).rsi()
+        
+        # Moving Averages
+        df['SMA_20'] = ta.trend.SMAIndicator(
+            close=df['Close'], 
+            window=config.SMA_PERIOD
+        ).sma_indicator()
+        
+        df['SMA_50'] = ta.trend.SMAIndicator(
+            close=df['Close'], 
+            window=50
+        ).sma_indicator()
+        
+        df['EMA_12'] = ta.trend.EMAIndicator(
+            close=df['Close'], 
+            window=12
+        ).ema_indicator()
+        
+        df['EMA_26'] = ta.trend.EMAIndicator(
+            close=df['Close'], 
+            window=26
+        ).ema_indicator()
+        
+        # MACD
+        macd = ta.trend.MACD(close=df['Close'])
+        df['MACD'] = macd.macd()
+        df['MACD_Signal'] = macd.macd_signal()
+        df['MACD_Histogram'] = macd.macd_diff()
+        
+        # Bollinger Bands
+        bollinger = ta.volatility.BollingerBands(close=df['Close'])
+        df['BB_Upper'] = bollinger.bollinger_hband()
+        df['BB_Middle'] = bollinger.bollinger_mavg()
+        df['BB_Lower'] = bollinger.bollinger_lband()
+        df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / df['BB_Middle']
+        
+        # ATR (Average True Range)
+        df['ATR'] = ta.volatility.AverageTrueRange(
+            high=df['High'],
+            low=df['Low'], 
+            close=df['Close']
+        ).average_true_range()
+        
+        # Stochastic
+        stoch = ta.momentum.StochasticOscillator(
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close']
+        )
+        df['Stoch_K'] = stoch.stoch()
+        df['Stoch_D'] = stoch.stoch_signal()
+        
+        # Volume indicators
+        if 'Volume' in df.columns and df['Volume'].sum() > 0:
+            df['Volume_SMA'] = ta.volume.VolumeSMAIndicator(
+                close=df['Close'],
+                volume=df['Volume']
+            ).volume_sma()
             
-        # Calculate required lookback for features
-        primary_tf_feature_lookback = max(config.AI_RETURN_PERIODS) + \
-                                    config.AI_VOLATILITY_PERIOD + \
-                                    config.AI_ICT_FEATURE_LOOKBACK + 100
+            # On-Balance Volume
+            df['OBV'] = ta.volume.OnBalanceVolumeIndicator(
+                close=df['Close'],
+                volume=df['Volume']
+            ).on_balance_volume()
         
-        total_limit = max(limit, primary_tf_feature_lookback)
+        # Price change and returns
+        df['Price_Change'] = df['Close'].pct_change()
+        df['Price_Change_Abs'] = df['Close'].diff()
         
-        logger.info(f"Fetching primary TF ({timeframe}, {total_limit} candles) data for {symbol}...")
+        # Volatility
+        df['Volatility'] = df['Price_Change'].rolling(20).std()
         
-        df = self.fetch_ohlcv_data(symbol, timeframe, total_limit)
+        logger.debug("Technical indicators added successfully")
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error adding technical indicators: {e}")
+        return df
+
+def get_processed_data(symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
+    """
+    Get processed data with technical indicators
+    
+    Args:
+        symbol: Trading symbol
+        timeframe: Timeframe
+        limit: Maximum number of candles
+    
+    Returns:
+        DataFrame with OHLCV data and technical indicators
+    """
+    try:
+        # Fetch raw data
+        df = fetch_ohlcv_data(symbol, timeframe, limit)
         
         if df.empty:
             logger.error(f"No data available for {symbol}")
             return pd.DataFrame()
         
-        return df
-    
-    def get_htf_data(self, symbol: str, htf_timeframes: List[str]) -> Dict[str, pd.DataFrame]:
-        """
-        Get Higher Time Frame data for multiple timeframes
-        """
-        htf_data = {}
+        # Add technical indicators
+        df = add_technical_indicators(df)
         
-        for htf in htf_timeframes:
-            try:
-                logger.info(f"Fetching HTF ({htf}, {config.HTF_LOOKBACK_CANDLES} candles) data for {symbol}...")
-                
-                htf_df = self.fetch_ohlcv_data(symbol, htf, config.HTF_LOOKBACK_CANDLES)
-                
-                if not htf_df.empty:
-                    htf_data[htf] = htf_df
-                    logger.debug(f"HTF {htf}: {len(htf_df)} candles loaded")
-                else:
-                    logger.warning(f"No HTF data available for {htf}")
-                    
-            except Exception as e:
-                logger.error(f"Error fetching HTF data for {htf}: {e}")
+        logger.info(f"Processed data ready: {len(df)} candles with indicators")
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error getting processed data: {e}")
+        return pd.DataFrame()
+
+def get_htf_data(symbol: str, timeframes: List[str]) -> Dict[str, pd.DataFrame]:
+    """
+    Get Higher Time Frame (HTF) data for multiple timeframes
+    
+    Args:
+        symbol: Trading symbol
+        timeframes: List of timeframes (e.g., ['1d', '4h'])
+    
+    Returns:
+        Dictionary with timeframe as key and DataFrame as value
+    """
+    htf_data = {}
+    
+    try:
+        for tf in timeframes:
+            logger.info(f"Fetching HTF data for {symbol} on {tf}")
+            
+            # Determine appropriate limit based on timeframe
+            limit_map = {
+                '1h': 500,
+                '4h': 200, 
+                '1d': 100,
+                '1w': 52,
+                '1M': 24
+            }
+            
+            limit = limit_map.get(tf, 200)
+            
+            df = get_processed_data(symbol, tf, limit)
+            
+            if not df.empty:
+                htf_data[tf] = df
+                logger.info(f"HTF {tf}: {len(df)} candles loaded")
+            else:
+                logger.warning(f"No HTF data available for {tf}")
         
         return htf_data
+        
+    except Exception as e:
+        logger.error(f"Error fetching HTF data: {e}")
+        return {}
+
+def resample_data(df: pd.DataFrame, target_timeframe: str) -> pd.DataFrame:
+    """
+    Resample data to different timeframe
     
-    def validate_data_quality(self, df: pd.DataFrame) -> bool:
-        """
-        Validate data quality and completeness
-        """
+    Args:
+        df: Source DataFrame
+        target_timeframe: Target timeframe (e.g., '4h', '1d')
+    
+    Returns:
+        Resampled DataFrame
+    """
+    try:
         if df.empty:
-            logger.error("DataFrame is empty")
-            return False
+            return df
         
-        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            logger.error(f"Missing required columns: {missing_columns}")
-            return False
-        
-        # Check for data consistency
-        if (df['High'] < df['Low']).any():
-            logger.warning("Data inconsistency: High < Low detected")
-            return False
-        
-        if (df['High'] < df['Close']).any() or (df['Low'] > df['Close']).any():
-            logger.warning("Data inconsistency: Close outside High/Low range")
-            return False
-        
-        # Check for sufficient data
-        if len(df) < 50:
-            logger.warning(f"Insufficient data: only {len(df)} candles")
-            return False
-        
-        logger.debug("Data quality validation passed")
-        return True
-    
-    def get_latest_price(self, symbol: str) -> Optional[float]:
-        """
-        Get the latest price for a symbol
-        """
-        try:
-            df = self.fetch_ohlcv_data(symbol, '1m', 1)
-            if not df.empty:
-                return float(df['Close'].iloc[-1])
-        except Exception as e:
-            logger.error(f"Error getting latest price for {symbol}: {e}")
-        
-        return None
-    
-    def calculate_volatility(self, df: pd.DataFrame, period: int = 20) -> pd.Series:
-        """
-        Calculate price volatility
-        """
-        try:
-            returns = df['Close'].pct_change()
-            volatility = returns.rolling(window=period).std() * np.sqrt(period)
-            return volatility.fillna(0)
-        except Exception as e:
-            logger.error(f"Error calculating volatility: {e}")
-            return pd.Series(index=df.index, data=0.0)
-    
-    def get_market_hours_info(self, symbol: str) -> Dict[str, Any]:
-        """
-        Get market hours information for a symbol
-        """
-        # Basic market hours (can be expanded)
-        market_info = {
-            'is_open': True,  # Crypto markets are always open
-            'next_open': None,
-            'next_close': None,
-            'timezone': 'UTC'
+        # Define resampling rules
+        agg_dict = {
+            'Open': 'first',
+            'High': 'max', 
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
         }
         
-        # For traditional markets, add specific hours
-        if symbol.endswith('=F') or any(x in symbol for x in ['GC', 'SI', 'CL']):
-            # Futures markets
-            market_info.update({
-                'market_type': 'futures',
-                'trading_hours': '23:00 Sun - 22:00 Fri (UTC)'
-            })
+        # Resample
+        resampled = df.resample(target_timeframe).agg(agg_dict)
         
-        return market_info
+        # Remove rows with NaN values
+        resampled = resampled.dropna()
+        
+        # Add technical indicators to resampled data
+        resampled = add_technical_indicators(resampled)
+        
+        logger.info(f"Data resampled to {target_timeframe}: {len(resampled)} candles")
+        return resampled
+        
+    except Exception as e:
+        logger.error(f"Error resampling data: {e}")
+        return df
 
-# Create global instance
-data_handler = DataHandler()
+def validate_data_quality(df: pd.DataFrame) -> Tuple[bool, List[str]]:
+    """
+    Validate data quality and return issues found
+    
+    Args:
+        df: DataFrame to validate
+    
+    Returns:
+        Tuple of (is_valid, list_of_issues)
+    """
+    issues = []
+    
+    try:
+        if df.empty:
+            issues.append("DataFrame is empty")
+            return False, issues
+        
+        # Check for required columns
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            issues.append(f"Missing columns: {missing_columns}")
+        
+        # Check for NaN values
+        nan_columns = df.columns[df.isnull().any()].tolist()
+        if nan_columns:
+            issues.append(f"NaN values in columns: {nan_columns}")
+        
+        # Check for negative or zero prices
+        price_columns = ['Open', 'High', 'Low', 'Close']
+        for col in price_columns:
+            if col in df.columns:
+                invalid_prices = (df[col] <= 0).sum()
+                if invalid_prices > 0:
+                    issues.append(f"Invalid prices in {col}: {invalid_prices} rows")
+        
+        # Check OHLC relationships
+        if all(col in df.columns for col in price_columns):
+            high_issues = (df['High'] < df[['Open', 'Low', 'Close']].max(axis=1)).sum()
+            low_issues = (df['Low'] > df[['Open', 'High', 'Close']].min(axis=1)).sum()
+            
+            if high_issues > 0:
+                issues.append(f"High price inconsistencies: {high_issues} rows")
+            if low_issues > 0:
+                issues.append(f"Low price inconsistencies: {low_issues} rows")
+        
+        # Check for sufficient data
+        if len(df) < 20:
+            issues.append(f"Insufficient data: only {len(df)} candles")
+        
+        is_valid = len(issues) == 0
+        return is_valid, issues
+        
+    except Exception as e:
+        issues.append(f"Validation error: {e}")
+        return False, issues
 
-# Convenience functions
-def fetch_ohlcv_data(symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
-    """Convenience function to fetch OHLCV data"""
-    return data_handler.fetch_ohlcv_data(symbol, timeframe, limit)
+def get_market_hours_data(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    """
+    Split data by market hours (Asian, London, US sessions)
+    
+    Args:
+        df: DataFrame with timestamp index
+    
+    Returns:
+        Dictionary with session data
+    """
+    try:
+        if df.empty:
+            return {}
+        
+        # Ensure index is datetime
+        if not isinstance(df.index, pd.DatetimeIndex):
+            return {}
+        
+        # Define session hours (UTC)
+        sessions = {
+            'asian': (0, 8),      # 00:00 - 08:00 UTC
+            'london': (8, 16),    # 08:00 - 16:00 UTC  
+            'us': (13, 21),       # 13:00 - 21:00 UTC
+            'overlap': (13, 16)   # London/US overlap
+        }
+        
+        session_data = {}
+        
+        for session_name, (start_hour, end_hour) in sessions.items():
+            # Filter data by hour
+            session_mask = (df.index.hour >= start_hour) & (df.index.hour < end_hour)
+            session_df = df[session_mask].copy()
+            
+            if not session_df.empty:
+                session_data[session_name] = session_df
+                logger.debug(f"{session_name} session: {len(session_df)} candles")
+        
+        return session_data
+        
+    except Exception as e:
+        logger.error(f"Error splitting market hours data: {e}")
+        return {}
 
-def get_processed_data(symbol: str, timeframe: str, limit: int = None) -> pd.DataFrame:
-    """Convenience function to get processed data"""
-    return data_handler.get_processed_data(symbol, timeframe, limit)
+def calculate_statistics(df: pd.DataFrame) -> Dict[str, float]:
+    """
+    Calculate basic statistics for the dataset
+    
+    Args:
+        df: DataFrame with OHLCV data
+    
+    Returns:
+        Dictionary with statistics
+    """
+    try:
+        if df.empty or 'Close' not in df.columns:
+            return {}
+        
+        stats = {
+            'count': len(df),
+            'mean_price': df['Close'].mean(),
+            'std_price': df['Close'].std(),
+            'min_price': df['Close'].min(),
+            'max_price': df['Close'].max(),
+            'price_range': df['Close'].max() - df['Close'].min(),
+            'mean_volume': df['Volume'].mean() if 'Volume' in df.columns else 0,
+            'volatility': df['Close'].pct_change().std() * np.sqrt(252),  # Annualized
+            'total_return': (df['Close'].iloc[-1] / df['Close'].iloc[0] - 1) * 100,
+            'max_drawdown': calculate_max_drawdown(df['Close'])
+        }
+        
+        return stats
+        
+    except Exception as e:
+        logger.error(f"Error calculating statistics: {e}")
+        return {}
 
-def get_htf_data(symbol: str, htf_timeframes: List[str]) -> Dict[str, pd.DataFrame]:
-    """Convenience function to get HTF data"""
-    return data_handler.get_htf_data(symbol, htf_timeframes)
+def calculate_max_drawdown(prices: pd.Series) -> float:
+    """
+    Calculate maximum drawdown from price series
+    
+    Args:
+        prices: Series of prices
+    
+    Returns:
+        Maximum drawdown as percentage
+    """
+    try:
+        # Calculate cumulative returns
+        cumulative = (1 + prices.pct_change()).cumprod()
+        
+        # Calculate running maximum
+        running_max = cumulative.cummax()
+        
+        # Calculate drawdown
+        drawdown = (cumulative - running_max) / running_max
+        
+        # Return maximum drawdown as percentage
+        return drawdown.min() * 100
+        
+    except Exception as e:
+        logger.error(f"Error calculating max drawdown: {e}")
+        return 0.0
+
+# Convenience functions for specific symbols
+def get_gold_data(timeframe: str = '1h', limit: int = 1000) -> pd.DataFrame:
+    """Get processed gold (GC=F) data"""
+    return get_processed_data('GC=F', timeframe, limit)
+
+def get_gold_htf_data() -> Dict[str, pd.DataFrame]:
+    """Get HTF data for gold using configured timeframes"""
+    timeframes = config.HTF_TIMEFRAMES.split(',') if hasattr(config, 'HTF_TIMEFRAMES') else ['1d', '4h']
+    return get_htf_data('GC=F', timeframes)
+
+# Cache management
+_data_cache = {}
+_cache_timestamps = {}
+
+def get_cached_data(symbol: str, timeframe: str, cache_duration: int = 300) -> Optional[pd.DataFrame]:
+    """
+    Get data from cache if available and fresh
+    
+    Args:
+        symbol: Trading symbol
+        timeframe: Timeframe
+        cache_duration: Cache duration in seconds
+    
+    Returns:
+        Cached DataFrame or None
+    """
+    try:
+        cache_key = f"{symbol}_{timeframe}"
+        
+        if cache_key in _data_cache and cache_key in _cache_timestamps:
+            cache_age = datetime.now().timestamp() - _cache_timestamps[cache_key]
+            
+            if cache_age < cache_duration:
+                logger.debug(f"Using cached data for {cache_key}")
+                return _data_cache[cache_key].copy()
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error accessing cache: {e}")
+        return None
+
+def cache_data(symbol: str, timeframe: str, df: pd.DataFrame) -> None:
+    """
+    Cache data for future use
+    
+    Args:
+        symbol: Trading symbol
+        timeframe: Timeframe  
+        df: DataFrame to cache
+    """
+    try:
+        cache_key = f"{symbol}_{timeframe}"
+        _data_cache[cache_key] = df.copy()
+        _cache_timestamps[cache_key] = datetime.now().timestamp()
+        logger.debug(f"Data cached for {cache_key}")
+        
+    except Exception as e:
+        logger.error(f"Error caching data: {e}")
+
+def clear_cache() -> None:
+    """Clear all cached data"""
+    global _data_cache, _cache_timestamps
+    _data_cache.clear()
+    _cache_timestamps.clear()
+    logger.info("Data cache cleared")
