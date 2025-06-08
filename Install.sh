@@ -121,6 +121,15 @@ configure_advanced_backtest() {
     cd "$PROJECT_DIR"
     source "$VENV_DIR/bin/activate"
     
+    # اطمینان از وجود فایل و اجازه اجرا
+    if [[ ! -f "config_wizard.py" ]]; then
+        echo -e "${RED}❌ فایل config_wizard.py یافت نشد!${NC}"
+        return 1
+    fi
+    
+    # اعطای اجازه اجرا
+    chmod +x config_wizard.py
+    
     # اجرای فایل جداگانه
     python config_wizard.py
     
