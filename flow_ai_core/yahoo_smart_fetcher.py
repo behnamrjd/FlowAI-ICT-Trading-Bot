@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Yahoo Finance Smart Fetcher v3.0 - Complete & Robust
+Yahoo Finance Smart Fetcher v3.0 - Complete & Error-Free
 Multi-symbol fallback with advanced error handling
 Author: Behnam RJD
 """
@@ -41,20 +41,25 @@ class YahooCacheManager:
         self.cache_dir = cache_dir
         self.cache_duration = timedelta(hours=cache_duration_hours)
         os.makedirs(cache_dir, exist_ok=True)
-        self.memory_cache = {}  # In-memory cache for faster access
+        self.memory_cache = {}
         self.cache_timestamps = {}
     
     def get_cache_path(self, symbol, period, interval):
         """Get cache file path for given parameters"""
-        filename = f"{symbol.replace('=', '_').replace('^', '_')}_{period}_{interval}.pkl"
+        # Clean symbol name for filename
+        clean_symbol = symbol.replace('=', '_').replace('^', '_').replace('/', '_')
+        filename = f"{clean_symbol}_{period}_{interval}.pkl"
         return os.path.join(self.cache_dir, filename)
     
     def is_cache_valid(self, cache_path):
         """Check if cache file is still valid"""
         if not os.path.exists(cache_path):
             return False
-        cache_time = datetime.fromtimestamp(os.path.getmtime(cache_path))
-        return datetime.now() - cache_time < self.cache_duration
+        try:
+            cache_time = datetime.fromtimestamp(os.path.getmtime(cache_path))
+            return datetime.now() - cache_time < self.cache_duration
+        except Exception:
+            return False
     
     def get_cached_data(self, symbol, period, interval):
         """Get data from cache (memory first, then disk)"""
@@ -118,12 +123,12 @@ class YahooCacheManager:
 class RobustYahooFetcher:
     """Robust Yahoo Finance fetcher with multi-symbol fallback"""
     
-    def __init__(self, requests_per_minute=12, cache_duration_hours=1):
+    def __init__(self, requests_per_minute=10, cache_duration_hours=1):
         self.requests_per_minute = requests_per_minute
         self.last_request_time = 0
         self.cache_manager = YahooCacheManager(cache_duration_hours=cache_duration_hours)
         self.failed_attempts = 0
-        self.blacklisted_symbols = set()  # Track failed symbols
+        self.blacklisted_symbols = set()
     
     def _calculate_delay(self):
         """Calculate delay for conservative rate limiting"""
@@ -159,6 +164,66 @@ class RobustYahooFetcher:
         
         import threading
         threading.Thread(target=remove_blacklist, daemon=True).start()
+    
+    def _validate_data(self, data):
+        """Validate data quality - Fixed for pandas Series ambiguity"""
+        try:
+            # Basic existence check
+            if data is None or data.empty:
+                return False
+            
+            # Check for required columns
+            required_columns = ['Open', 'High', 'Low', 'Close']
+            for col in required_columns:
+                if col not in data.columns:
+                    logger.warning(f"Missing column: {col}")
+                    return False
+            
+            # Check minimum data length
+            if len(data) < 1:
+                logger.warning("No data rows")
+                return False
+            
+            # Validate latest price data (avoid Series truth ambiguity)
+            try:
+                latest_close = float(data['Close'].iloc[-1])
+                latest_high = float(data['High'].iloc[-1])
+                latest_low = float(data['Low'].iloc[-1])
+                latest_open = float(data['Open'].iloc[-1])
+                
+                # Check for valid numbers
+                if any(pd.isna(x) for x in [latest_close, latest_high, latest_low, latest_open]):
+                    logger.warning("NaN values in latest data")
+                    return False
+                
+                # Check for positive prices
+                if any(x <= 0 for x in [latest_close, latest_high, latest_low, latest_open]):
+                    logger.warning("Non-positive prices detected")
+                    return False
+                
+                # Check OHLC relationships
+                if latest_high < latest_low:
+                    logger.warning("High < Low relationship error")
+                    return False
+                
+                if latest_high < max(latest_open, latest_close):
+                    logger.warning("High < Open/Close relationship error")
+                    return False
+                    
+                if latest_low > min(latest_open, latest_close):
+                    logger.warning("Low > Open/Close relationship error")
+                    return False
+                
+            except (IndexError, ValueError, TypeError) as e:
+                logger.warning(f"Price validation error: {e}")
+                return False
+            
+            logger.debug(f"Data validation passed: {len(data)} records")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Data validation error: {e}")
+            return False
     
     def fetch_single_symbol(self, symbol, period="5d", interval="1h", max_retries=3):
         """Fetch data for a single symbol with robust error handling"""
@@ -198,8 +263,7 @@ class RobustYahooFetcher:
                     threads=False,
                     auto_adjust=True,
                     actions=False,
-                    timeout=30,
-                    repair=True  # Try to repair bad data
+                    timeout=30
                 )
                 
                 if data is not None and not data.empty:
@@ -240,7 +304,7 @@ class RobustYahooFetcher:
                     if attempt < max_retries - 1:
                         time.sleep(random.uniform(10, 20))
                         continue
-                        
+                    
                 else:
                     logger.error(f"❌ Unexpected error for {symbol}: {e}")
                     if attempt < max_retries - 1:
@@ -251,66 +315,6 @@ class RobustYahooFetcher:
         
         logger.error(f"❌ Failed to fetch {symbol} after {max_retries} attempts")
         return pd.DataFrame()
-    
-def _validate_data(self, data):
-    """Validate data quality - Fixed for pandas Series ambiguity"""
-    try:
-        # Basic existence check
-        if data is None or data.empty:
-            return False
-        
-        # Check for required columns
-        required_columns = ['Open', 'High', 'Low', 'Close']
-        for col in required_columns:
-            if col not in data.columns:
-                logger.warning(f"Missing column: {col}")
-                return False
-        
-        # Check minimum data length
-        if len(data) < 1:
-            logger.warning("No data rows")
-            return False
-        
-        # Validate latest price data (avoid Series truth ambiguity)
-        try:
-            latest_close = float(data['Close'].iloc[-1])
-            latest_high = float(data['High'].iloc[-1])
-            latest_low = float(data['Low'].iloc[-1])
-            latest_open = float(data['Open'].iloc[-1])
-            
-            # Check for valid numbers
-            if any(pd.isna(x) for x in [latest_close, latest_high, latest_low, latest_open]):
-                logger.warning("NaN values in latest data")
-                return False
-            
-            # Check for positive prices
-            if any(x <= 0 for x in [latest_close, latest_high, latest_low, latest_open]):
-                logger.warning("Non-positive prices detected")
-                return False
-            
-            # Check OHLC relationships
-            if latest_high < latest_low:
-                logger.warning("High < Low relationship error")
-                return False
-            
-            if latest_high < max(latest_open, latest_close):
-                logger.warning("High < Open/Close relationship error")
-                return False
-                
-            if latest_low > min(latest_open, latest_close):
-                logger.warning("Low > Open/Close relationship error")
-                return False
-            
-        except (IndexError, ValueError, TypeError) as e:
-            logger.warning(f"Price validation error: {e}")
-            return False
-        
-        logger.debug(f"✅ Data validation passed: {len(data)} records")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Data validation error: {e}")
-        return False
     
     def fetch_data_with_fallback(self, symbols, period="5d", interval="1h"):
         """Fetch data with symbol fallback"""
@@ -336,7 +340,7 @@ def _validate_data(self, data):
         logger.info("Yahoo fetcher reset")
 
 # Global instance with conservative settings
-_robust_fetcher = RobustYahooFetcher(requests_per_minute=10)
+_robust_fetcher = RobustYahooFetcher(requests_per_minute=8)
 
 def fetch_yahoo_data_smart(symbol, period="5d", interval="1h"):
     """Main function with single symbol"""
