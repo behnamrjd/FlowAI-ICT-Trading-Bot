@@ -252,30 +252,65 @@ class RobustYahooFetcher:
         logger.error(f"❌ Failed to fetch {symbol} after {max_retries} attempts")
         return pd.DataFrame()
     
-    def _validate_data(self, data):
-        """Validate data quality"""
-        try:
-            if data.empty:
-                return False
-            
-            # Check for required columns
-            required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-            if not all(col in data.columns for col in required_columns):
-                return False
-            
-            # Check for valid price data
-            if (data['Close'] <= 0).any():
-                return False
-            
-            # Check for reasonable OHLC relationships
-            if (data['High'] < data['Low']).any():
-                return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Data validation error: {e}")
+def _validate_data(self, data):
+    """Validate data quality - Fixed for pandas Series ambiguity"""
+    try:
+        # Basic existence check
+        if data is None or data.empty:
             return False
+        
+        # Check for required columns
+        required_columns = ['Open', 'High', 'Low', 'Close']
+        for col in required_columns:
+            if col not in data.columns:
+                logger.warning(f"Missing column: {col}")
+                return False
+        
+        # Check minimum data length
+        if len(data) < 1:
+            logger.warning("No data rows")
+            return False
+        
+        # Validate latest price data (avoid Series truth ambiguity)
+        try:
+            latest_close = float(data['Close'].iloc[-1])
+            latest_high = float(data['High'].iloc[-1])
+            latest_low = float(data['Low'].iloc[-1])
+            latest_open = float(data['Open'].iloc[-1])
+            
+            # Check for valid numbers
+            if any(pd.isna(x) for x in [latest_close, latest_high, latest_low, latest_open]):
+                logger.warning("NaN values in latest data")
+                return False
+            
+            # Check for positive prices
+            if any(x <= 0 for x in [latest_close, latest_high, latest_low, latest_open]):
+                logger.warning("Non-positive prices detected")
+                return False
+            
+            # Check OHLC relationships
+            if latest_high < latest_low:
+                logger.warning("High < Low relationship error")
+                return False
+            
+            if latest_high < max(latest_open, latest_close):
+                logger.warning("High < Open/Close relationship error")
+                return False
+                
+            if latest_low > min(latest_open, latest_close):
+                logger.warning("Low > Open/Close relationship error")
+                return False
+            
+        except (IndexError, ValueError, TypeError) as e:
+            logger.warning(f"Price validation error: {e}")
+            return False
+        
+        logger.debug(f"✅ Data validation passed: {len(data)} records")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Data validation error: {e}")
+        return False
     
     def fetch_data_with_fallback(self, symbols, period="5d", interval="1h"):
         """Fetch data with symbol fallback"""
