@@ -111,6 +111,42 @@ pause_with_message() {
     read -n 1 -s
 }
 
+configure_advanced_backtest() {
+    print_step "Advanced Backtest Configuration"
+    
+    echo -e "${CYAN}🎯 تنظیمات پیشرفته بک‌تست FlowAI${NC}"
+    echo -e "${WHITE}این ویزارد به شما کمک می‌کند بهترین تنظیمات را انتخاب کنید${NC}"
+    echo ""
+    
+    cd "$PROJECT_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    python << 'EOF'
+import sys
+sys.path.append('.')
+
+from flow_ai_core.backtest_engine import SmartBacktestConfig
+
+# راه‌اندازی ویزارد تنظیمات
+config_wizard = SmartBacktestConfig()
+user_config = config_wizard.interactive_configuration()
+
+# نمایش خلاصه و تأیید
+if config_wizard.display_configuration_summary(user_config):
+    # ذخیره تنظیمات
+    if config_wizard.save_configuration(user_config):
+        print("\n✅ تنظیمات با موفقیت ذخیره شد!")
+        print("📁 فایل: advanced_backtest_config.json")
+    else:
+        print("\n❌ خطا در ذخیره تنظیمات")
+else:
+    print("\n❌ تنظیمات لغو شد")
+EOF
+    
+    echo ""
+    pause_with_message
+}
+
 confirm_action() {
     local message=$1
     echo -e "${YELLOW}$message (y/N): ${NC}"
@@ -1339,6 +1375,11 @@ show_management_menu() {
         echo -e "${WHITE}🔧 Developer Tools:${NC}"
         echo -e "${WHITE}13.${NC} 🛠️  Developer Tools Menu"
         echo ""
+        echo -e "${WHITE}📊 Advanced Analytics:${NC}"
+        echo -e "${WHITE}15.${NC} 🎯 Configure Advanced Backtest"
+        echo -e "${WHITE}16.${NC} 📈 Run Custom Backtest"
+        echo -e "${WHITE}17.${NC} 📊 View Backtest Results"
+        echo -e "${WHITE}18.${NC} 🔄 Scheduled Backtest Manager"
         
         echo -e "${WHITE}14.${NC} 🗑️ Uninstall"
         echo -e "${WHITE}15.${NC} 🚪 Exit"
