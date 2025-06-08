@@ -191,8 +191,10 @@ def engineer_features(df):
     
     return features
 
+# جایگزین کردن تابع get_ai_prediction در main.py:
+
 def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-    """Get advanced AI model prediction with filtering"""
+    """Get advanced AI model prediction with adaptive filtering"""
     global ai_model, ai_features
     
     try:
@@ -210,38 +212,64 @@ def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, An
         current_hour = current_time.hour
         current_volume = processed_ltf_data['Volume'].iloc[-1]
         volume_ma = processed_ltf_data['Volume'].rolling(20).mean().iloc[-1]
-        current_volatility = X_live_features['volatility_20'].iloc[-1]
-        volatility_ma = X_live_features['volatility_20'].rolling(50).mean().iloc[-1]
+        current_volatility = X_live_features['volatility_20'].iloc[-1] if 'volatility_20' in X_live_features.columns else 0
+        volatility_ma = X_live_features['volatility_20'].rolling(50).mean().iloc[-1] if 'volatility_20' in X_live_features.columns else 1
         
-        # === TIME-BASED FILTERING ===
+        # === ADAPTIVE TIME-BASED FILTERING ===
         high_vol_hours = [(8, 10), (13, 15), (20, 22)]
-        is_high_vol_time = any(start <= current_hour <= end for start, end in high_vol_hours)
+        extended_hours = [(6, 12), (12, 18), (18, 24)]
         
-        if not is_high_vol_time:
-            logger.info(f"Outside high volatility hours (current: {current_hour}). Skipping prediction.")
+        is_high_vol_time = any(start <= current_hour <= end for start, end in high_vol_hours)
+        is_extended_time = any(start <= current_hour <= end for start, end in extended_hours)
+        
+        # Calculate session strength
+        if 13 <= current_hour <= 16:  # London/US overlap
+            session_strength = 1.0
+        elif current_hour in [8, 9, 10, 20, 21, 22]:  # Session opens
+            session_strength = 0.8
+        elif is_extended_time:
+            session_strength = 0.6
+        else:
+            session_strength = 0.3
+        
+        # === MARKET CONDITION ANALYSIS ===
+        volume_ratio = current_volume / volume_ma if volume_ma > 0 else 1
+        volatility_ratio = current_volatility / volatility_ma if volatility_ma > 0 else 1
+        
+        # Adaptive confidence multiplier
+        confidence_multiplier = 1.0
+        
+        if is_high_vol_time:
+            confidence_multiplier = 1.0
+            logger.info(f"High volatility trading hours (current: {current_hour})")
+        elif is_extended_time and volatility_ratio > 1.2 and volume_ratio > 1.3:
+            confidence_multiplier = 0.7
+            logger.info(f"Extended hours with good conditions (current: {current_hour})")
+        elif volatility_ratio > 2.0 and volume_ratio > 2.0:
+            confidence_multiplier = 0.5
+            logger.info(f"Emergency high volatility trading (current: {current_hour})")
+        else:
+            logger.info(f"Outside optimal trading hours (current: {current_hour}). Skipping prediction.")
             return {
                 'prediction': 2,  # HOLD
                 'label': 'HOLD',
                 'probabilities': [0.1, 0.1, 0.8, 0.0, 0.0],
                 'confidence': 0.8,
-                'reason': 'Outside trading hours'
+                'reason': f'Outside trading hours (Hour: {current_hour})',
+                'session_strength': session_strength
             }
         
-        # === VOLUME FILTERING ===
-        volume_ratio = current_volume / volume_ma if volume_ma > 0 else 1
-        if volume_ratio < getattr(config, 'MIN_VOLUME_MULTIPLIER', 1.2):
-            logger.info(f"Low volume detected ({volume_ratio:.2f}x). Reducing signal strength.")
-            volume_penalty = 0.7
-        else:
-            volume_penalty = 1.0
+        # === VOLUME & VOLATILITY FILTERING ===
+        min_volume_mult = getattr(config, 'MIN_VOLUME_MULTIPLIER', 1.2)
+        min_vol_mult = getattr(config, 'MIN_VOLATILITY_MULTIPLIER', 1.1)
         
-        # === VOLATILITY FILTERING ===
-        volatility_ratio = current_volatility / volatility_ma if volatility_ma > 0 else 1
-        if volatility_ratio < getattr(config, 'MIN_VOLATILITY_MULTIPLIER', 1.1):
+        if volume_ratio < min_volume_mult:
+            logger.info(f"Low volume detected ({volume_ratio:.2f}x). Reducing signal strength.")
+            confidence_multiplier *= 0.8
+        
+        if volatility_ratio < min_vol_mult:
             logger.info(f"Low volatility detected ({volatility_ratio:.2f}x). Reducing signal strength.")
-            volatility_penalty = 0.8
-        else:
-            volatility_penalty = 1.0
+            confidence_multiplier *= 0.9
         
         # Use the last row for prediction
         X_latest = X_live_features.iloc[-1:].values
@@ -258,23 +286,29 @@ def get_ai_prediction(processed_ltf_data: pd.DataFrame) -> Optional[Dict[str, An
         try:
             metadata = joblib.load(getattr(config, 'MODEL_METADATA_PATH', 'model_metadata.pkl'))
             target_names = metadata.get('target_names', ['STRONG_SELL', 'SELL', 'HOLD', 'BUY', 'STRONG_BUY'])
+            model_version = metadata.get('model_version', '2.0')
         except:
             target_names = ['STRONG_SELL', 'SELL', 'HOLD', 'BUY', 'STRONG_BUY']
+            model_version = '2.0'
         
         predicted_label = target_names[prediction] if prediction < len(target_names) else 'HOLD'
-        confidence = max(probabilities) * volume_penalty * volatility_penalty
+        final_confidence = max(probabilities) * confidence_multiplier * session_strength
         
-        logger.info(f"AI raw: {prediction}, Label: {predicted_label}, Confidence: {confidence:.3f}")
+        logger.info(f"AI raw: {prediction}, Label: {predicted_label}, Confidence: {final_confidence:.3f}")
         logger.info(f"Market conditions - Volume: {volume_ratio:.2f}x, Volatility: {volatility_ratio:.2f}x")
+        logger.info(f"Session strength: {session_strength:.1f}, Model version: {model_version}")
         
         return {
             'prediction': prediction,
             'label': predicted_label,
             'probabilities': probabilities.tolist(),
-            'confidence': confidence,
+            'confidence': final_confidence,
             'volume_ratio': volume_ratio,
             'volatility_ratio': volatility_ratio,
-            'is_high_vol_time': is_high_vol_time
+            'is_high_vol_time': is_high_vol_time,
+            'is_extended_time': is_extended_time,
+            'session_strength': session_strength,
+            'model_version': model_version
         }
         
     except Exception as e:
