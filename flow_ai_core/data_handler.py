@@ -82,19 +82,15 @@ def fetch_ohlcv_data(symbol: str, timeframe: str, limit: int = 1000) -> pd.DataF
         return pd.DataFrame()
 
 def process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Process raw Yahoo Finance data to standard format
-    
-    Args:
-        df: Raw DataFrame from Yahoo Finance
-    
-    Returns:
-        Processed DataFrame with standard columns
-    """
+    """Process raw Yahoo Finance data to standard format"""
     try:
         # Reset index to get datetime as column
         if df.index.name in ['Date', 'Datetime']:
             df = df.reset_index()
+        
+        # اصلاح column mapping - handle MultiIndex columns
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(0)  # حذف سطح اول
         
         # Standardize column names
         column_mapping = {
@@ -117,18 +113,12 @@ def process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         if 'timestamp' in df.columns:
             df.set_index('timestamp', inplace=True)
         
-        # Ensure we have required columns
+        # اطمینان از تک ستونه بودن OHLCV columns
         required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            logger.warning(f"Missing columns: {missing_columns}")
-            # Fill missing columns with Close price (except Volume)
-            for col in missing_columns:
-                if col == 'Volume':
-                    df[col] = 0
-                else:
-                    df[col] = df['Close'] if 'Close' in df.columns else 0
+        for col in required_columns:
+            if col in df.columns:
+                if isinstance(df[col], pd.DataFrame):
+                    df[col] = df[col].iloc[:, 0]  # اولین ستون
         
         # Clean data
         df = clean_ohlcv_data(df)

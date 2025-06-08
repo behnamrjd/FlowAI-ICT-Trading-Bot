@@ -842,9 +842,9 @@ api_testing_utilities() {
     cd "$PROJECT_DIR"
     source "$VENV_DIR/bin/activate"
     
-    # Test Yahoo Finance API with smart fetcher
-    echo -e "${CYAN}Testing Yahoo Finance Smart Fetcher...${NC}"
-    python << 'EOF'
+# Test Yahoo Finance API with smart fetcher
+echo -e "${CYAN}Testing Yahoo Finance Smart Fetcher...${NC}"
+python << 'EOF'
 import sys
 sys.path.append('.')
 
@@ -855,10 +855,10 @@ try:
     
     # تست با parameters مختلف
     test_configs = [
-        ("GC=F", "5d", "1h"),     # اول: 5 روز، 1 ساعت
-        ("GLD", "5d", "1h"),      # دوم: Gold ETF
-        ("IAU", "5d", "1h"),      # سوم: Gold Trust
-        ("^GSPC", "5d", "1h")     # چهارم: S&P 500 برای تست
+        ("GC=F", "5d", "1h"),
+        ("GLD", "5d", "1h"),
+        ("IAU", "5d", "1h"),
+        ("^GSPC", "5d", "1h")
     ]
     
     for symbol, period, interval in test_configs:
@@ -866,8 +866,8 @@ try:
         data = fetch_yahoo_data_smart(symbol, period=period, interval=interval)
         
         if data is not None and not data.empty:
-            # اصلاح کامل - تبدیل به float برای جلوگیری از Series error
             try:
+                # اطمینان از scalar بودن
                 latest_price = float(data['Close'].iloc[-1])
                 start_time = str(data.index[0])
                 end_time = str(data.index[-1])
@@ -875,7 +875,7 @@ try:
                 print(f"✅ {symbol}: Working ({len(data)} records)")
                 print(f"   Latest price: ${latest_price:.2f}")
                 print(f"   Data range: {start_time} to {end_time}")
-                break  # اگه یکی کار کرد، بقیه رو تست نکن
+                break
                 
             except (ValueError, TypeError, IndexError) as format_error:
                 print(f"⚠️ {symbol}: Data received but formatting error: {format_error}")
@@ -885,13 +885,10 @@ try:
             print(f"❌ {symbol}: No data received")
     
     else:
-        print("❌ All symbols failed - Yahoo Finance may have issues")
+        print("❌ All symbols failed")
         
 except Exception as e:
     print(f"❌ Yahoo Finance Smart Fetcher: Error - {e}")
-    import traceback
-    print("Debug traceback:")
-    traceback.print_exc()
 EOF
     
     echo ""

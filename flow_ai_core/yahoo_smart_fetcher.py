@@ -255,7 +255,7 @@ class RobustYahooFetcher:
                 logger.info(f"Fetching {symbol} data (attempt {attempt + 1}/{max_retries})")
                 
                 # Use yfinance with conservative parameters
-                data = yf.download(
+                    data = yf.download(
                     symbol,
                     period=period,
                     interval=interval,
@@ -263,21 +263,27 @@ class RobustYahooFetcher:
                     threads=False,
                     auto_adjust=True,
                     actions=False,
-                    timeout=30
+                    timeout=30,
+                    group_by=None  # اضافه شده - جلوگیری از MultiIndex
                 )
-                
-                if data is not None and not data.empty:
-                    # Validate data quality
-                    if self._validate_data(data):
-                        self.failed_attempts = 0
-                        self.last_request_time = time.time()
-                        self.cache_manager.save_to_cache(data, symbol, period, interval)
-                        
-                        logger.info(f"✅ Successfully fetched {len(data)} records for {symbol}")
-                        return data
-                    else:
-                        logger.warning(f"Invalid data quality for {symbol}")
-                        continue
+
+# اصلاح MultiIndex columns اگر وجود داشت
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.droplevel(0)
+
+if data is not None and not data.empty:
+    # Validate data quality
+    if self._validate_data(data):
+        self.failed_attempts = 0
+        self.last_request_time = time.time()
+        self.cache_manager.save_to_cache(data, symbol, period, interval)
+        
+        logger.info(f"✅ Successfully fetched {len(data)} records for {symbol}")
+        return data
+    else:
+        logger.warning(f"Invalid data quality for {symbol}")
+        continue
+
                 else:
                     logger.warning(f"⚠️ Empty data received for {symbol}")
                     
