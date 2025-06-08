@@ -175,88 +175,58 @@ def clean_ohlcv_data(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
 def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add technical indicators to OHLCV data
-    
-    Args:
-        df: DataFrame with OHLCV data
-    
-    Returns:
-        DataFrame with added technical indicators
-    """
+    """Add technical indicators - Fixed for new TA library"""
     try:
         if df.empty or len(df) < 20:
             logger.warning("Insufficient data for technical indicators")
             return df
         
-        # RSI
-        df['RSI'] = ta.momentum.RSIIndicator(
-            close=df['Close'], 
-            window=config.RSI_PERIOD
-        ).rsi()
+        # RSI - Fixed syntax
+        df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
         
-        # Moving Averages
-        df['SMA_20'] = ta.trend.SMAIndicator(
-            close=df['Close'], 
-            window=config.SMA_PERIOD
-        ).sma_indicator()
+        # Moving Averages - Simple calculation
+        df['SMA_20'] = df['Close'].rolling(window=20).mean()
+        df['SMA_50'] = df['Close'].rolling(window=50).mean()
+        df['EMA_12'] = df['Close'].ewm(span=12).mean()
+        df['EMA_26'] = df['Close'].ewm(span=26).mean()
         
-        df['SMA_50'] = ta.trend.SMAIndicator(
-            close=df['Close'], 
-            window=50
-        ).sma_indicator()
+        # MACD - Fixed syntax
+        df['MACD'] = ta.trend.macd_diff(df['Close'])
+        df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
+        df['MACD_Histogram'] = ta.trend.macd(df['Close'])
         
-        df['EMA_12'] = ta.trend.EMAIndicator(
-            close=df['Close'], 
-            window=12
-        ).ema_indicator()
-        
-        df['EMA_26'] = ta.trend.EMAIndicator(
-            close=df['Close'], 
-            window=26
-        ).ema_indicator()
-        
-        # MACD
-        macd = ta.trend.MACD(close=df['Close'])
-        df['MACD'] = macd.macd()
-        df['MACD_Signal'] = macd.macd_signal()
-        df['MACD_Histogram'] = macd.macd_diff()
-        
-        # Bollinger Bands
-        bollinger = ta.volatility.BollingerBands(close=df['Close'])
-        df['BB_Upper'] = bollinger.bollinger_hband()
-        df['BB_Middle'] = bollinger.bollinger_mavg()
-        df['BB_Lower'] = bollinger.bollinger_lband()
+        # Bollinger Bands - Manual calculation
+        bb_period = 20
+        bb_std = 2
+        df['BB_Middle'] = df['Close'].rolling(window=bb_period).mean()
+        bb_std_dev = df['Close'].rolling(window=bb_period).std()
+        df['BB_Upper'] = df['BB_Middle'] + (bb_std_dev * bb_std)
+        df['BB_Lower'] = df['BB_Middle'] - (bb_std_dev * bb_std)
         df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / df['BB_Middle']
         
-        # ATR (Average True Range)
-        df['ATR'] = ta.volatility.AverageTrueRange(
+        # ATR - Fixed syntax
+        df['ATR'] = ta.volatility.average_true_range(
+            high=df['High'], 
+            low=df['Low'], 
+            close=df['Close'], 
+            window=14
+        )
+        
+        # Stochastic - Fixed syntax
+        df['Stoch_K'] = ta.momentum.stoch(
             high=df['High'],
             low=df['Low'], 
-            close=df['Close']
-        ).average_true_range()
-        
-        # Stochastic
-        stoch = ta.momentum.StochasticOscillator(
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close']
+            close=df['Close'],
+            window=14
         )
-        df['Stoch_K'] = stoch.stoch()
-        df['Stoch_D'] = stoch.stoch_signal()
+        df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
         
-        # Volume indicators
+        # Volume indicators - Simple calculation
         if 'Volume' in df.columns and df['Volume'].sum() > 0:
-            df['Volume_SMA'] = df['Volume'].rolling(20).mean(
-                close=df['Close'],
-                volume=df['Volume']
-            ).volume_sma()
+            df['Volume_SMA'] = df['Volume'].rolling(window=20).mean()
             
-            # On-Balance Volume
-            df['OBV'] = ta.volume.OnBalanceVolumeIndicator(
-                close=df['Close'],
-                volume=df['Volume']
-            ).on_balance_volume()
+            # On-Balance Volume - Manual calculation
+            df['OBV'] = (df['Volume'] * ((df['Close'] - df['Close'].shift(1)) > 0).astype(int)).cumsum()
         
         # Price change and returns
         df['Price_Change'] = df['Close'].pct_change()
@@ -265,12 +235,16 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
         # Volatility
         df['Volatility'] = df['Price_Change'].rolling(20).std()
         
+        # Fill NaN values
+        df = df.fillna(method='ffill').fillna(0)
+        
         logger.debug("Technical indicators added successfully")
         return df
         
     except Exception as e:
         logger.error(f"Error adding technical indicators: {e}")
         return df
+
 
 def get_processed_data(symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
     """
