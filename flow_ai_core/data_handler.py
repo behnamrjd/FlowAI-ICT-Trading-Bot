@@ -247,7 +247,7 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
         
         # Volume indicators
         if 'Volume' in df.columns and df['Volume'].sum() > 0:
-            df['Volume_SMA'] = ta.volume.VolumeSMAIndicator(
+            df['Volume_SMA'] = df['Volume'].rolling(20).mean(
                 close=df['Close'],
                 volume=df['Volume']
             ).volume_sma()
