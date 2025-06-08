@@ -1683,13 +1683,17 @@ show_management_menu() {
             11) update_project ;;
             12) system_info ;;
             13) developer_tools_menu ;;
-            14) uninstall_project ;;
-            15) 
+            15) configure_advanced_backtest ;;
+            16) run_custom_backtest ;;
+            17) view_backtest_results ;;
+            18) scheduled_backtest_manager ;;
+            19) uninstall_project ;;
+            20) 
                 echo -e "${CYAN}Goodbye! FlowAI XAU Trading Bot v3.0 by Behnam RJD${NC}"
                 exit 0
                 ;;
             *)
-                print_error "Invalid option. Please choose 1-15."
+                print_error "Invalid option. Please choose 1-20."
                 sleep 2
                 ;;
         esac
