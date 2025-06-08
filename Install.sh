@@ -1663,11 +1663,11 @@ show_management_menu() {
         echo -e "${WHITE}17.${NC} 📊 View Backtest Results"
         echo -e "${WHITE}18.${NC} 🔄 Scheduled Backtest Manager"
         
-        echo -e "${WHITE}14.${NC} 🗑️ Uninstall"
-        echo -e "${WHITE}15.${NC} 🚪 Exit"
+        echo -e "${WHITE}19.${NC} 🗑️ Uninstall"
+        echo -e "${WHITE}20.${NC} 🚪 Exit"
         echo ""
         
-        read -p "Choose option (1-15): " choice
+        read -p "Choose option (1-20): " choice
         
         case $choice in
             1) start_bot; pause_with_message ;;
