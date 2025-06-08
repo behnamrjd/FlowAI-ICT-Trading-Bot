@@ -121,7 +121,8 @@ configure_advanced_backtest() {
     cd "$PROJECT_DIR"
     source "$VENV_DIR/bin/activate"
     
-    python << 'EOF'
+    # اجرای مستقیم Python script
+    python -c "
 import sys
 sys.path.append('.')
 
@@ -135,13 +136,13 @@ user_config = config_wizard.interactive_configuration()
 if config_wizard.display_configuration_summary(user_config):
     # ذخیره تنظیمات
     if config_wizard.save_configuration(user_config):
-        print("\n✅ تنظیمات با موفقیت ذخیره شد!")
-        print("📁 فایل: advanced_backtest_config.json")
+        print('\n✅ تنظیمات با موفقیت ذخیره شد!')
+        print('📁 فایل: advanced_backtest_config.json')
     else:
-        print("\n❌ خطا در ذخیره تنظیمات")
+        print('\n❌ خطا در ذخیره تنظیمات')
 else:
-    print("\n❌ تنظیمات لغو شد")
-EOF
+    print('\n❌ تنظیمات لغو شد')
+"
     
     echo ""
     pause_with_message
