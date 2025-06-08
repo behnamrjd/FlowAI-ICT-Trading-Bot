@@ -183,96 +183,95 @@ class RobustYahooFetcher:
             logger.error(f"Data validation error: {e}")
             return False
     
-    def fetch_single_symbol(self, symbol, period="5d", interval="1h", max_retries=3):
-        """Fetch data for a single symbol"""
-        
-        if self._is_symbol_blacklisted(symbol):
-            logger.debug(f"Skipping blacklisted symbol: {symbol}")
-            return pd.DataFrame()
-        
-        cached_data = self.cache_manager.get_cached_data(symbol, period, interval)
-        if cached_data is not None:
-            return cached_data
-        
-        delay = self._calculate_delay()
-        if delay > 0:
-            logger.debug(f"Rate limiting: waiting {delay:.1f} seconds")
-            time.sleep(delay)
-        
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    smart_delay = self._smart_delay(attempt)
-                    logger.info(f"Retry {attempt + 1} for {symbol}: waiting {smart_delay:.1f} seconds")
-                    time.sleep(smart_delay)
-                
-                logger.info(f"Fetching {symbol} data (attempt {attempt + 1}/{max_retries})")
-                
-data = yf.download(
-    symbol,
-    period=period,
-    interval=interval,
-    progress=False,
-    threads=False,
-    auto_adjust=True,
-    actions=False,
-    timeout=30,
-    group_by=None  # اضافه کردن این خط
-)
-
-# اضافه کردن این بخش بعد از yf.download:
-if isinstance(data.columns, pd.MultiIndex):
-    data.columns = data.columns.droplevel(0)
-
-                
-                if data is not None and not data.empty:
-                    if self._validate_data(data):
-                        self.failed_attempts = 0
-                        self.last_request_time = time.time()
-                        self.cache_manager.save_to_cache(data, symbol, period, interval)
-                        
-                        logger.info(f"✅ Successfully fetched {len(data)} records for {symbol}")
-                        return data
-                    else:
-                        logger.warning(f"Invalid data quality for {symbol}")
-                        continue
-                else:
-                    logger.warning(f"⚠️ Empty data received for {symbol}")
-                    
-            except Exception as e:
-                error_str = str(e).lower()
-                
-                if any(keyword in error_str for keyword in ['429', 'rate limit', 'too many requests']):
-                    logger.warning(f"🚫 Rate limit detected for {symbol}: {e}")
-                    self.failed_attempts += 1
-                    
-                    if attempt < max_retries - 1:
-                        rate_limit_delay = 90 + random.uniform(30, 60)
-                        logger.info(f"Rate limit backoff: {rate_limit_delay:.1f} seconds")
-                        time.sleep(rate_limit_delay)
-                        continue
-                        
-                elif any(keyword in error_str for keyword in ['delisted', 'no price data', 'not found']):
-                    logger.error(f"❌ Symbol {symbol} appears to be delisted or invalid")
-                    self._blacklist_symbol(symbol, 60)
-                    break
-                    
-                elif any(keyword in error_str for keyword in ['network', 'connection', 'timeout']):
-                    logger.warning(f"🌐 Network error for {symbol}: {e}")
-                    if attempt < max_retries - 1:
-                        time.sleep(random.uniform(10, 20))
-                        continue
-                    
-                else:
-                    logger.error(f"❌ Unexpected error for {symbol}: {e}")
-                    if attempt < max_retries - 1:
-                        time.sleep(random.uniform(5, 10))
-                        continue
-                
-                break
-        
-        logger.error(f"❌ Failed to fetch {symbol} after {max_retries} attempts")
+def fetch_single_symbol(self, symbol, period="5d", interval="1h", max_retries=3):
+    """Fetch data for a single symbol with robust error handling"""
+    
+    if self._is_symbol_blacklisted(symbol):
+        logger.debug(f"Skipping blacklisted symbol: {symbol}")
         return pd.DataFrame()
+    
+    cached_data = self.cache_manager.get_cached_data(symbol, period, interval)
+    if cached_data is not None:
+        return cached_data
+    
+    delay = self._calculate_delay()
+    if delay > 0:
+        logger.debug(f"Rate limiting: waiting {delay:.1f} seconds")
+        time.sleep(delay)
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                smart_delay = self._smart_delay(attempt)
+                logger.info(f"Retry {attempt + 1} for {symbol}: waiting {smart_delay:.1f} seconds")
+                time.sleep(smart_delay)
+            
+            logger.info(f"Fetching {symbol} data (attempt {attempt + 1}/{max_retries})")
+            
+            data = yf.download(
+                symbol,
+                period=period,
+                interval=interval,
+                progress=False,
+                threads=False,
+                auto_adjust=True,
+                actions=False,
+                timeout=30,
+                group_by=None
+            )
+            
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.droplevel(0)
+            
+            if data is not None and not data.empty:
+                if self._validate_data(data):
+                    self.failed_attempts = 0
+                    self.last_request_time = time.time()
+                    self.cache_manager.save_to_cache(data, symbol, period, interval)
+                    
+                    logger.info(f"✅ Successfully fetched {len(data)} records for {symbol}")
+                    return data
+                else:
+                    logger.warning(f"Invalid data quality for {symbol}")
+                    continue
+            else:
+                logger.warning(f"⚠️ Empty data received for {symbol}")
+                
+        except Exception as e:
+            error_str = str(e).lower()
+            
+            if any(keyword in error_str for keyword in ['429', 'rate limit', 'too many requests']):
+                logger.warning(f"🚫 Rate limit detected for {symbol}: {e}")
+                self.failed_attempts += 1
+                
+                if attempt < max_retries - 1:
+                    rate_limit_delay = 90 + random.uniform(30, 60)
+                    logger.info(f"Rate limit backoff: {rate_limit_delay:.1f} seconds")
+                    time.sleep(rate_limit_delay)
+                    continue
+                    
+            elif any(keyword in error_str for keyword in ['delisted', 'no price data', 'not found']):
+                logger.error(f"❌ Symbol {symbol} appears to be delisted or invalid")
+                self._blacklist_symbol(symbol, 60)
+                break
+                
+            elif any(keyword in error_str for keyword in ['network', 'connection', 'timeout']):
+                logger.warning(f"🌐 Network error for {symbol}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(10, 20))
+                    continue
+                
+            else:
+                logger.error(f"❌ Unexpected error for {symbol}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(5, 10))
+                    continue
+            
+            break
+    
+    logger.error(f"❌ Failed to fetch {symbol} after {max_retries} attempts")
+    return pd.DataFrame()
+
     
     def fetch_data_with_fallback(self, symbols, period="5d", interval="1h"):
         """Fetch data with symbol fallback - REQUIRED METHOD"""
