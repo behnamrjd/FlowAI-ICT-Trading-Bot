@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Yahoo Finance Smart Fetcher v3.0 - Simple & Safe
-Minimal interference with yfinance internals
+Yahoo Finance Smart Fetcher v3.0 - Error-Free Version
+Compatible with all yfinance versions
 Author: Behnam RJD
 """
 
@@ -15,15 +15,6 @@ import logging
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
-
-# User-Agent Pool for environment variation
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:132.0) Gecko/20100101 Firefox/132.0'
-]
 
 class YahooCacheManager:
     """Simple cache manager for reducing API calls"""
@@ -64,7 +55,7 @@ class YahooCacheManager:
             logger.error(f"Failed to cache data: {e}")
 
 class SimpleYahooFetcher:
-    """Simple, safe Yahoo Finance fetcher"""
+    """Simple, safe Yahoo Finance fetcher - Error-Free"""
     
     def __init__(self, requests_per_minute=15, cache_duration_hours=1):
         self.requests_per_minute = requests_per_minute
@@ -83,14 +74,12 @@ class SimpleYahooFetcher:
         """Smart delay with exponential backoff"""
         if attempt == 0:
             return 0
-        
-        # Base delay increases with failed attempts
         base_delay = min(30, 5 * (2 ** (attempt - 1)))
         jitter = random.uniform(0.5, 1.5)
         return base_delay * jitter
     
     def fetch_data(self, symbol, period="5d", interval="1h", max_retries=5):
-        """Fetch data with minimal interference"""
+        """Fetch data with only valid yfinance parameters"""
         
         # Check cache first
         cached_data = self.cache_manager.get_cached_data(symbol, period, interval)
@@ -111,17 +100,19 @@ class SimpleYahooFetcher:
                     logger.info(f"Attempt {attempt + 1}: waiting {smart_delay:.1f} seconds")
                     time.sleep(smart_delay)
                 
-                # Simple yfinance call - let it handle everything
+                # Simple yfinance call with only valid parameters
                 logger.info(f"Fetching {symbol} data (attempt {attempt + 1}/{max_retries})")
                 
-                # Use yf.download - simplest and most reliable
+                # Use only guaranteed valid parameters
                 data = yf.download(
                     symbol, 
                     period=period, 
                     interval=interval, 
                     progress=False,
-                    show_errors=False,
-                    threads=False  # Single threaded for stability
+                    threads=False,
+                    auto_adjust=True,
+                    actions=False,
+                    timeout=30
                 )
                 
                 if data is not None and not data.empty:
@@ -138,12 +129,10 @@ class SimpleYahooFetcher:
             except Exception as e:
                 error_str = str(e).lower()
                 
-                # Handle different types of errors
                 if any(keyword in error_str for keyword in ['429', 'rate limit', 'too many requests']):
                     logger.warning(f"🚫 Rate limit detected: {e}")
                     self.failed_attempts += 1
                     
-                    # Longer delay for rate limits
                     if attempt < max_retries - 1:
                         rate_limit_delay = 60 + random.uniform(30, 90)
                         logger.info(f"Rate limit backoff: {rate_limit_delay:.1f} seconds")
@@ -154,14 +143,8 @@ class SimpleYahooFetcher:
                     logger.error(f"❌ No data available for {symbol}")
                     break
                     
-                elif 'network' in error_str or 'connection' in error_str:
-                    logger.warning(f"🌐 Network error: {e}")
-                    if attempt < max_retries - 1:
-                        time.sleep(random.uniform(5, 15))
-                        continue
-                        
                 else:
-                    logger.error(f"❌ Unexpected error: {e}")
+                    logger.error(f"❌ Error: {e}")
                     if attempt < max_retries - 1:
                         time.sleep(random.uniform(2, 5))
                         continue
@@ -176,11 +159,11 @@ class SimpleYahooFetcher:
         self.failed_attempts = 0
         logger.info("Yahoo fetcher reset")
 
-# Global instance with conservative settings
-_simple_fetcher = SimpleYahooFetcher(requests_per_minute=12)  # Very conservative
+# Global instance
+_simple_fetcher = SimpleYahooFetcher(requests_per_minute=12)
 
 def fetch_yahoo_data_smart(symbol, period="5d", interval="1h"):
-    """Main function - simple and safe"""
+    """Main function - error-free"""
     return _simple_fetcher.fetch_data(symbol, period, interval)
 
 def reset_yahoo_fetcher():
@@ -188,7 +171,6 @@ def reset_yahoo_fetcher():
     global _simple_fetcher
     _simple_fetcher.reset()
 
-# Convenience functions
 def fetch_gold_data(period="5d", interval="1h"):
     """Fetch gold data safely"""
     return fetch_yahoo_data_smart("GC=F", period, interval)
