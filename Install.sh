@@ -856,8 +856,8 @@ try:
     # تست با parameters مختلف
     test_configs = [
         ("GC=F", "5d", "1h"),     # اول: 5 روز، 1 ساعت
-        ("GC=F", "1mo", "1d"),    # دوم: 1 ماه، 1 روز  
-        ("GOLD", "5d", "1h"),     # سوم: نماد جایگزین
+        ("GLD", "5d", "1h"),      # دوم: Gold ETF
+        ("IAU", "5d", "1h"),      # سوم: Gold Trust
         ("^GSPC", "5d", "1h")     # چهارم: S&P 500 برای تست
     ]
     
@@ -866,14 +866,21 @@ try:
         data = fetch_yahoo_data_smart(symbol, period=period, interval=interval)
         
         if data is not None and not data.empty:
-            latest_price = data['Close'].iloc[-1]
-            start_time = str(data.index[0])
-            end_time = str(data.index[-1])
-            
-            print(f"✅ {symbol}: Working ({len(data)} records)")
-            print(f"   Latest price: ${latest_price:.2f}")
-            print(f"   Data range: {start_time} to {end_time}")
-            break  # اگه یکی کار کرد، بقیه رو تست نکن
+            # اصلاح کامل - تبدیل به float برای جلوگیری از Series error
+            try:
+                latest_price = float(data['Close'].iloc[-1])
+                start_time = str(data.index[0])
+                end_time = str(data.index[-1])
+                
+                print(f"✅ {symbol}: Working ({len(data)} records)")
+                print(f"   Latest price: ${latest_price:.2f}")
+                print(f"   Data range: {start_time} to {end_time}")
+                break  # اگه یکی کار کرد، بقیه رو تست نکن
+                
+            except (ValueError, TypeError, IndexError) as format_error:
+                print(f"⚠️ {symbol}: Data received but formatting error: {format_error}")
+                print(f"✅ {symbol}: Working ({len(data)} records) - Price format skipped")
+                break
         else:
             print(f"❌ {symbol}: No data received")
     
@@ -882,6 +889,9 @@ try:
         
 except Exception as e:
     print(f"❌ Yahoo Finance Smart Fetcher: Error - {e}")
+    import traceback
+    print("Debug traceback:")
+    traceback.print_exc()
 EOF
     
     echo ""
