@@ -855,9 +855,9 @@ try:
     data = fetch_yahoo_data_smart("GC=F", period="1d", interval="1h")
     
     if data is not None and not data.empty:
-        # اصلاح کامل - استفاده از iloc برای همه
+        # اصلاح کامل - همه مقادیر scalar باشند
         latest_price = data['Close'].iloc[-1]
-        start_time = str(data.index[0])  # اصلاح شده
+        start_time = str(data.index[0])    # ✅ اصلاح شده
         end_time = str(data.index[-1])
         
         print(f"✅ Yahoo Finance Smart Fetcher: Working ({len(data)} records)")
