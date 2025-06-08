@@ -59,24 +59,25 @@ class AdvancedFeatureEngineer:
         features['volatility_ratio'] = (features['volatility_5'] / features['volatility_20']).fillna(1)
         features['volatility_regime'] = (features['volatility_20'] / features['volatility_50']).fillna(1)
         
-        # ATR with safe division - اصلاح شده
-        high_low = df['High'] - df['Low']
-        high_close = np.abs(df['High'] - df['Close'].shift())
-        low_close = np.abs(df['Low'] - df['Close'].shift())
-        true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+# ATR with safe division
+high_low = df['High'] - df['Low']
+high_close = np.abs(df['High'] - df['Close'].shift())
+low_close = np.abs(df['Low'] - df['Close'].shift())
+true_range = np.maximum(high_low, np.maximum(high_close, low_close))
 
-        # Fix true_range if it's a DataFrame
-        if isinstance(true_range, pd.DataFrame):
-        true_range = true_range.iloc[:, 0]
+# Fix true_range if it's a DataFrame
+if isinstance(true_range, pd.DataFrame):
+    true_range = true_range.iloc[:, 0]
 
-        features['atr'] = true_range.rolling(14).mean().fillna(0)
+features['atr'] = true_range.rolling(14).mean().fillna(0)
 
-        # اصلاح ATR normalized - اطمینان از Series بودن
-        close_values = df['Close']
-        if isinstance(close_values, pd.DataFrame):
-        close_values = close_values.iloc[:, 0]
+# اصلاح ATR normalized
+close_values = df['Close']
+if isinstance(close_values, pd.DataFrame):
+    close_values = close_values.iloc[:, 0]
 
-        features['atr_normalized'] = features['atr'] / close_values
+features['atr_normalized'] = features['atr'] / close_values
+
 
         # Safe ATR ratio
         atr_values = features['atr'].values
