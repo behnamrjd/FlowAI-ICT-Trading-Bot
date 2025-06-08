@@ -155,3 +155,22 @@ MIN_VOLATILITY_MULTIPLIER = get_env_var("MIN_VOLATILITY_MULTIPLIER", 1.1, var_ty
 
 # Model Metadata Path
 MODEL_METADATA_PATH = get_env_var("MODEL_METADATA_PATH", "model_metadata.pkl")
+
+# ===== ADVANCED AI CONFIGURATION v3.0 =====
+AI_EXTENDED_HOURS = get_env_var("AI_EXTENDED_HOURS", True, var_type=bool)
+EXTENDED_TRADING_ENABLED = get_env_var("EXTENDED_TRADING_ENABLED", True, var_type=bool)
+SESSION_STRENGTH_THRESHOLD = get_env_var("SESSION_STRENGTH_THRESHOLD", 0.5, var_type=float)
+
+# Extended Trading Hours (UTC)
+EXTENDED_TRADING_HOURS = [(6, 12), (12, 18), (18, 24)]
+
+# Advanced Target Thresholds v3.0
+AI_STRONG_BUY_THRESHOLD = get_env_var("AI_STRONG_BUY_THRESHOLD", 0.008, var_type=float)
+AI_BUY_THRESHOLD = get_env_var("AI_BUY_THRESHOLD", 0.003, var_type=float)
+AI_HOLD_THRESHOLD = get_env_var("AI_HOLD_THRESHOLD", 0.001, var_type=float)
+AI_SELL_THRESHOLD = get_env_var("AI_SELL_THRESHOLD", -0.003, var_type=float)
+AI_STRONG_SELL_THRESHOLD = get_env_var("AI_STRONG_SELL_THRESHOLD", -0.008, var_type=float)
+
+# Model Configuration v3.0
+MODEL_VERSION = get_env_var("MODEL_VERSION", "3.0")
+MODEL_METADATA_PATH = get_env_var("MODEL_METADATA_PATH", "model_metadata.pkl")
