@@ -855,14 +855,22 @@ try:
     data = fetch_yahoo_data_smart("GC=F", period="1d", interval="1h")
     
     if data is not None and not data.empty:
+        # اصلاح فرمت string - استفاده از iloc برای دریافت مقدار عددی
+        latest_price = data['Close'].iloc[-1]
+        start_time = str(data.index[0])
+        end_time = str(data.index[-1])
+        
         print(f"✅ Yahoo Finance Smart Fetcher: Working ({len(data)} records)")
-        print(f"   Latest price: ${data['Close'].iloc[-1]:.2f}")
-        print(f"   Data range: {data.index[0]} to {data.index[-1]}")
+        print(f"   Latest price: ${latest_price:.2f}")
+        print(f"   Data range: {start_time} to {end_time}")
     else:
         print("❌ Yahoo Finance Smart Fetcher: No data received")
         
 except Exception as e:
     print(f"❌ Yahoo Finance Smart Fetcher: Error - {e}")
+    import traceback
+    print("Debug info:")
+    traceback.print_exc()
 EOF
     
     echo ""
