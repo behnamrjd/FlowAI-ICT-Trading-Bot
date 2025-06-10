@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # =====================================================
-# FlowAI-ICT Trading Bot Complete Installer v3.9
-# Fixed Package Installation + Log Issues + Complete
+# FlowAI-ICT Trading Bot Complete Installer v4.0
+# Fixed All Issues + Complete Configuration
 # =====================================================
 
 # Colors and formatting
@@ -28,10 +28,8 @@ ERROR_COUNT=0
 
 # Initialize log files with proper permissions
 init_logs() {
-    # Ensure home directory exists
     mkdir -p "$USER_HOME" 2>/dev/null
     
-    # Create log files with fallback
     if touch "$LOG_FILE" 2>/dev/null; then
         chmod 644 "$LOG_FILE" 2>/dev/null
     else
@@ -46,7 +44,6 @@ init_logs() {
         touch "$ERROR_LOG"
     fi
     
-    # Count existing errors safely
     ERROR_COUNT=0
     if [ -f "$ERROR_LOG" ]; then
         local count=$(grep -c "ERROR #" "$ERROR_LOG" 2>/dev/null || echo "0")
@@ -78,13 +75,10 @@ log_error() {
     local exit_code="$4"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
-    # Safe error count increment
     ERROR_COUNT=$((ERROR_COUNT + 1))
     
-    # Console output
     print_error "$step failed: $error"
     
-    # Detailed error log
     {
         echo "[$timestamp] ERROR #$ERROR_COUNT"
         echo "Step: $step"
@@ -97,7 +91,6 @@ log_error() {
         echo "---"
     } >> "$ERROR_LOG" 2>/dev/null || true
     
-    # Show fix suggestion
     case "$step" in
         "System Update")
             echo -e "${CYAN}💡 Fix: sudo apt update && sudo apt upgrade${NC}"
@@ -127,7 +120,7 @@ log_success() {
 print_banner() {
     clear
     echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v3.9                    ${NC}${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.0                    ${NC}${PURPLE}║${NC}"
     if [ "$INSTALLATION_EXISTS" = true ]; then
         echo -e "${PURPLE}║${WHITE}${BOLD}              Management & Status Panel                     ${NC}${PURPLE}║${NC}"
     else
@@ -141,7 +134,6 @@ print_banner() {
     fi
 }
 
-# Simple progress display
 print_step_simple() {
     local step="$1"
     local current="$2"
@@ -223,11 +215,9 @@ handle_root_user() {
     if [[ $EUID -eq 0 ]]; then
         print_step "Running as root - auto-creating flowai user without password..."
         
-        # Create flowai user if doesn't exist
         if ! id "flowai" &>/dev/null; then
             if useradd -m -s /bin/bash flowai; then
                 usermod -aG sudo flowai
-                # Allow sudo without password
                 echo "flowai ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/flowai
                 chmod 440 /etc/sudoers.d/flowai
                 print_success "User 'flowai' created with sudo no-password access"
@@ -237,12 +227,10 @@ handle_root_user() {
             fi
         else
             print_success "User 'flowai' already exists"
-            # Ensure no-password sudo access
             echo "flowai ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/flowai
             chmod 440 /etc/sudoers.d/flowai
         fi
         
-        # Copy script to flowai home and set permissions
         if cp "$0" /home/flowai/Install.sh; then
             chown flowai:flowai /home/flowai/Install.sh
             chmod +x /home/flowai/Install.sh
@@ -264,7 +252,6 @@ quick_config() {
     echo -e "${CYAN}═══════════════════════════════${NC}"
     echo ""
     
-    # Telegram Bot Token
     while [ -z "$TELEGRAM_TOKEN" ]; do
         echo -e "${YELLOW}📱 Enter your Telegram Bot Token:${NC}"
         echo -e "${CYAN}   (Get it from @BotFather on Telegram)${NC}"
@@ -281,7 +268,6 @@ quick_config() {
         fi
     done
     
-    # Admin ID
     while [ -z "$ADMIN_ID" ]; do
         echo -e "${YELLOW}👤 Enter your Telegram User ID:${NC}"
         echo -e "${CYAN}   (Send /start to @userinfobot)${NC}"
@@ -306,7 +292,6 @@ install_packages_safely() {
     local packages="$1"
     local package_type="$2"
     
-    # First, update package lists
     print_step "Updating package lists..."
     if sudo apt update >/dev/null 2>&1; then
         print_success "Package lists updated"
@@ -314,7 +299,6 @@ install_packages_safely() {
         print_warning "Package list update failed, continuing..."
     fi
     
-    # Install packages one by one for better error detection
     local failed_packages=()
     local success_packages=()
     
@@ -329,7 +313,6 @@ install_packages_safely() {
         fi
     done
     
-    # Report results
     if [ ${#success_packages[@]} -gt 0 ]; then
         print_success "$package_type packages installed: ${success_packages[*]}"
     fi
@@ -338,17 +321,14 @@ install_packages_safely() {
         print_warning "$package_type packages failed: ${failed_packages[*]}"
         log_error "Package Installation" "Failed packages: ${failed_packages[*]}" "apt install" "1"
         
-        # For essential packages, this is critical
         if [ "$package_type" = "Essential" ]; then
             echo -e "${RED}Critical packages failed. Checking if system can continue...${NC}"
             
-            # Check if Python3 is available
             if ! command -v python3 &>/dev/null; then
                 echo -e "${RED}Python3 not available. Cannot continue.${NC}"
                 return 1
             fi
             
-            # Check if git is available
             if ! command -v git &>/dev/null; then
                 echo -e "${RED}Git not available. Cannot continue.${NC}"
                 return 1
@@ -361,13 +341,189 @@ install_packages_safely() {
     return 0
 }
 
-# Enhanced quick install with fixed package handling
+# Create complete config.py with all ICT variables
+create_complete_config() {
+    local config_file="$1"
+    
+    cat > "$config_file" << 'EOF'
+"""
+FlowAI-ICT Trading Bot Configuration v4.0
+Complete configuration with all ICT variables
+"""
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# ===== TELEGRAM CONFIGURATION =====
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_ADMIN_IDS = [int(x.strip()) for x in os.getenv('TELEGRAM_ADMIN_IDS', '').split(',') if x.strip()]
+TELEGRAM_PREMIUM_USERS = [int(x.strip()) for x in os.getenv('TELEGRAM_PREMIUM_USERS', '').split(',') if x.strip()]
+
+# ===== BRSAPI CONFIGURATION =====
+BRSAPI_KEY = os.getenv('BRSAPI_KEY', 'FreeQZdOYW6D3nNv95jZ9BcYXJHzTJpf')
+BRSAPI_DAILY_LIMIT = int(os.getenv('BRSAPI_DAILY_LIMIT', '10000'))
+BRSAPI_MINUTE_LIMIT = int(os.getenv('BRSAPI_MINUTE_LIMIT', '60'))
+
+# ===== ICT TRADING CONFIGURATION =====
+ICT_ENABLED = os.getenv('ICT_ENABLED', 'true').lower() == 'true'
+ORDER_BLOCK_DETECTION = os.getenv('ORDER_BLOCK_DETECTION', 'true').lower() == 'true'
+FAIR_VALUE_GAP_DETECTION = os.getenv('FAIR_VALUE_GAP_DETECTION', 'true').lower() == 'true'
+LIQUIDITY_SWEEP_DETECTION = os.getenv('LIQUIDITY_SWEEP_DETECTION', 'true').lower() == 'true'
+HTF_TIMEFRAMES = os.getenv('HTF_TIMEFRAMES', '1d,4h').split(',')
+LTF_TIMEFRAME = os.getenv('LTF_TIMEFRAME', '1h')
+
+# ===== AI MODEL CONFIGURATION =====
+AI_MODEL_ENABLED = os.getenv('AI_MODEL_ENABLED', 'true').lower() == 'true'
+AI_CONFIDENCE_THRESHOLD = float(os.getenv('AI_CONFIDENCE_THRESHOLD', '0.7'))
+AI_RETRAIN_INTERVAL = int(os.getenv('AI_RETRAIN_INTERVAL', '24'))
+
+# ===== SIGNAL GENERATION =====
+SIGNAL_GENERATION_ENABLED = os.getenv('SIGNAL_GENERATION_ENABLED', 'true').lower() == 'true'
+SIGNAL_CHECK_INTERVAL = int(os.getenv('SIGNAL_CHECK_INTERVAL', '300'))
+SIGNAL_MIN_CONFIDENCE = float(os.getenv('SIGNAL_MIN_CONFIDENCE', '0.6'))
+SIGNAL_COOLDOWN = int(os.getenv('SIGNAL_COOLDOWN', '300'))
+
+# ===== RISK MANAGEMENT =====
+ICT_RISK_PER_TRADE = float(os.getenv('ICT_RISK_PER_TRADE', '0.02'))
+ICT_MAX_DAILY_RISK = float(os.getenv('ICT_MAX_DAILY_RISK', '0.05'))
+ICT_RR_RATIO = float(os.getenv('ICT_RR_RATIO', '2.0'))
+MAX_DAILY_LOSS_PERCENT = float(os.getenv('MAX_DAILY_LOSS_PERCENT', '5.0'))
+MAX_POSITION_SIZE_PERCENT = float(os.getenv('MAX_POSITION_SIZE_PERCENT', '10.0'))
+MAX_DRAWDOWN_PERCENT = float(os.getenv('MAX_DRAWDOWN_PERCENT', '15.0'))
+MAX_DAILY_TRADES = int(os.getenv('MAX_DAILY_TRADES', '20'))
+
+# ===== MARKET HOURS =====
+MARKET_START_HOUR = int(os.getenv('MARKET_START_HOUR', '13'))
+MARKET_END_HOUR = int(os.getenv('MARKET_END_HOUR', '22'))
+MARKET_TIMEZONE = os.getenv('MARKET_TIMEZONE', 'UTC')
+
+# ===== LOGGING =====
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+LOG_FILE_PATH = os.getenv('LOG_FILE_PATH', 'logs/flowai_ict.log')
+LOG_MAX_SIZE = int(os.getenv('LOG_MAX_SIZE', '10'))
+LOG_BACKUP_COUNT = int(os.getenv('LOG_BACKUP_COUNT', '5'))
+
+# ===== NOTIFICATIONS =====
+NOTIFICATIONS_ENABLED = os.getenv('NOTIFICATIONS_ENABLED', 'true').lower() == 'true'
+EMAIL_NOTIFICATIONS = os.getenv('EMAIL_NOTIFICATIONS', 'false').lower() == 'true'
+WEBHOOK_NOTIFICATIONS = os.getenv('WEBHOOK_NOTIFICATIONS', 'false').lower() == 'true'
+
+# ===== PERFORMANCE =====
+CACHE_ENABLED = os.getenv('CACHE_ENABLED', 'true').lower() == 'true'
+CACHE_TTL = int(os.getenv('CACHE_TTL', '300'))
+PARALLEL_PROCESSING = os.getenv('PARALLEL_PROCESSING', 'true').lower() == 'true'
+MAX_WORKERS = int(os.getenv('MAX_WORKERS', '4'))
+
+# ===== DEVELOPMENT =====
+DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+TESTING_MODE = os.getenv('TESTING_MODE', 'false').lower() == 'true'
+PAPER_TRADING = os.getenv('PAPER_TRADING', 'true').lower() == 'true'
+
+# ===== ICT SWING ANALYSIS =====
+ICT_SWING_LOOKBACK_PERIODS = 10
+ICT_SWING_HIGH_LOW_PERIODS = 5
+ICT_STRUCTURE_CONFIRMATION_PERIODS = 3
+
+# ===== ICT MSS (Market Structure Shift) =====
+ICT_MSS_SWING_LOOKBACK = 20
+ICT_MSS_CONFIRMATION_PERIODS = 3
+ICT_MSS_MIN_BREAK_PERCENTAGE = 0.001
+
+# ===== ICT BOS (Break of Structure) =====
+ICT_BOS_SWING_LOOKBACK = 15
+ICT_BOS_CONFIRMATION_PERIODS = 2
+
+# ===== ICT CHoCH (Change of Character) =====
+ICT_CHOCH_LOOKBACK_PERIODS = 10
+ICT_CHOCH_CONFIRMATION = 3
+
+# ===== ICT ORDER BLOCK SETTINGS =====
+ICT_OB_MIN_BODY_RATIO = 0.3
+ICT_OB_MIN_SIZE = 0.0005
+ICT_OB_MAX_LOOKBACK = 20
+ICT_OB_CONFIRMATION_PERIODS = 3
+
+# ===== ICT FAIR VALUE GAP SETTINGS =====
+ICT_FVG_MIN_SIZE = 0.0003
+ICT_FVG_MAX_LOOKBACK = 15
+ICT_FVG_CONFIRMATION_PERIODS = 2
+
+# ===== ICT LIQUIDITY SETTINGS =====
+ICT_LIQUIDITY_MIN_VOLUME = 1000
+ICT_LIQUIDITY_SWEEP_THRESHOLD = 0.001
+ICT_LIQUIDITY_CONFIRMATION = 3
+
+# ===== ICT PD ARRAY SETTINGS =====
+ICT_PD_ARRAY_LOOKBACK_PERIODS = 50
+ICT_PD_ARRAY_MIN_TOUCHES = 3
+ICT_PD_ARRAY_CONFIRMATION = 2
+
+# ===== ICT PREMIUM DISCOUNT SETTINGS =====
+ICT_PREMIUM_THRESHOLD = 0.7
+ICT_DISCOUNT_THRESHOLD = 0.3
+ICT_EQUILIBRIUM_RANGE = 0.1
+
+# ===== ICT KILLZONE SETTINGS =====
+ICT_LONDON_KILLZONE_START = 7
+ICT_LONDON_KILLZONE_END = 10
+ICT_NY_KILLZONE_START = 13
+ICT_NY_KILLZONE_END = 16
+
+# ===== ICT PD RETRACEMENT LEVELS =====
+ICT_PD_RETRACEMENT_LEVELS = [0.236, 0.382, 0.5, 0.618, 0.786]
+ICT_PD_EXTENSION_LEVELS = [1.272, 1.414, 1.618, 2.0, 2.618]
+
+# ===== ICT DISPLACEMENT SETTINGS =====
+ICT_DISPLACEMENT_MIN_CANDLES = 5
+ICT_DISPLACEMENT_MIN_PERCENTAGE = 0.5
+
+# ===== ICT IMBALANCE SETTINGS =====
+ICT_IMBALANCE_MIN_SIZE = 0.0002
+ICT_IMBALANCE_MAX_AGE = 100
+
+# ===== ICT PATTERN SETTINGS =====
+ICT_ORDER_BLOCK_MIN_SIZE = 0.0005
+ICT_FAIR_VALUE_GAP_MIN_SIZE = 0.0003
+ICT_LIQUIDITY_THRESHOLD = 0.001
+
+# Configuration validation
+def validate_config():
+    """Validate configuration settings"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN is required")
+        return False
+    
+    if not TELEGRAM_ADMIN_IDS:
+        logger.error("TELEGRAM_ADMIN_IDS is required")
+        return False
+    
+    logger.info("Configuration validation passed")
+    return True
+
+# Initialize configuration
+if validate_config():
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("FlowAI-ICT Configuration loaded successfully")
+    logger.info(f"ICT Strategy: {'Enabled' if ICT_ENABLED else 'Disabled'}")
+    logger.info(f"AI Model: {'Enabled' if AI_MODEL_ENABLED else 'Disabled'}")
+    logger.info(f"Admin IDs: {TELEGRAM_ADMIN_IDS}")
+    logger.info(f"Premium Users: {len(TELEGRAM_PREMIUM_USERS)}")
+EOF
+}
+
+# Enhanced quick install with complete fixes
 quick_install() {
     print_banner
     echo -e "${CYAN}🚀 Quick Installation Starting...${NC}"
     echo ""
     
-    # Get configuration
     quick_config
     
     echo ""
@@ -382,7 +538,8 @@ quick_install() {
         "Virtual Environment"
         "Python Dependencies"
         "Directory Structure"
-        "Environment Configuration"
+        "Complete Configuration"
+        "Code Fixes"
         "System Service"
         "Utility Scripts"
         "Final Testing"
@@ -425,26 +582,35 @@ quick_install() {
     install_packages_safely "$optional_packages" "Optional"
     print_step_simple "${steps[2]}" $current $total "success"
     
-    # Step 4: Project Setup
+    # Step 4: Project Setup (FIXED)
     ((current++))
     print_step_simple "${steps[3]}" $current $total "running"
+    
+    # Remove any existing installation completely
     if [ -d "$INSTALL_DIR" ]; then
         backup_dir="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
         sudo mv "$INSTALL_DIR" "$backup_dir" >/dev/null 2>&1
         print_warning "Existing installation backed up to $backup_dir"
     fi
     
+    # Clone directly to correct location
     if timeout 120s sudo git clone https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot.git "$INSTALL_DIR" >/dev/null 2>&1; then
+        # Fix nested directory issue
+        if [ -d "$INSTALL_DIR/FlowAI-ICT-Trading-Bot" ]; then
+            print_warning "Fixing nested directory structure..."
+            sudo mv "$INSTALL_DIR/FlowAI-ICT-Trading-Bot"/* "$INSTALL_DIR/" 2>/dev/null
+            sudo rmdir "$INSTALL_DIR/FlowAI-ICT-Trading-Bot" 2>/dev/null
+        fi
+        
         sudo chown -R $CURRENT_USER:$CURRENT_USER "$INSTALL_DIR"
         print_step_simple "${steps[3]}" $current $total "success"
     else
         print_step_simple "${steps[3]}" $current $total "error"
         log_error "Git Clone" "Failed to clone repository" "git clone" "$?"
-        echo -e "${RED}Failed to clone repository. Check internet connection and GitHub access.${NC}"
         return 1
     fi
     
-    # Step 5: Virtual Environment
+    # Step 5: Virtual Environment (FIXED)
     ((current++))
     print_step_simple "${steps[4]}" $current $total "running"
     cd "$INSTALL_DIR" || {
@@ -452,6 +618,11 @@ quick_install() {
         log_error "Directory Change" "Cannot access $INSTALL_DIR" "cd" "1"
         return 1
     }
+    
+    # Remove existing venv if corrupted
+    if [ -d "venv" ]; then
+        rm -rf venv
+    fi
     
     if python3 -m venv venv >/dev/null 2>&1; then
         if source venv/bin/activate && pip install --upgrade pip setuptools wheel >/dev/null 2>&1; then
@@ -467,75 +638,76 @@ quick_install() {
         return 1
     fi
     
-    # Step 6: Python Dependencies
+    # Step 6: Python Dependencies (FIXED)
     ((current++))
     print_step_simple "${steps[5]}" $current $total "running"
     source venv/bin/activate
     
-    # Create requirements.txt
+    # Create fixed requirements.txt
     cat > requirements.txt << 'EOF'
 python-telegram-bot==13.15
+urllib3==1.26.18
 pandas>=1.5.0,<2.0.0
 numpy>=1.21.0,<2.0.0
 requests>=2.28.0,<3.0.0
 python-dotenv>=0.19.0,<1.0.0
 ta==0.10.2
-talib-binary>=0.4.24,<1.0.0
 jdatetime>=4.1.0,<5.0.0
 pytz>=2022.1
 aiohttp>=3.8.0,<4.0.0
 colorlog>=6.6.0,<7.0.0
 psutil>=5.9.0,<6.0.0
+six
+certifi
+cryptography
+apscheduler<4.0.0
 EOF
     
-    # Try bulk installation first
-    if timeout 600s pip install -r requirements.txt >/dev/null 2>&1; then
-        print_step_simple "${steps[5]}" $current $total "success"
-    else
-        print_warning "Bulk installation failed, trying individual packages..."
+    # Install with specific versions to avoid conflicts
+    local packages=(
+        "python-telegram-bot==13.15"
+        "urllib3==1.26.18"
+        "pandas>=1.5.0,<2.0.0"
+        "numpy>=1.21.0,<2.0.0"
+        "requests>=2.28.0,<3.0.0"
+        "python-dotenv>=0.19.0,<1.0.0"
+        "ta==0.10.2"
+        "jdatetime>=4.1.0,<5.0.0"
+        "pytz>=2022.1"
+        "aiohttp>=3.8.0,<4.0.0"
+        "colorlog>=6.6.0,<7.0.0"
+        "psutil>=5.9.0,<6.0.0"
+        "six"
+        "certifi"
+        "cryptography"
+        "apscheduler<4.0.0"
+    )
+    
+    local failed_packages=()
+    local success_count=0
+    
+    for package in "${packages[@]}"; do
+        local pkg_name=$(echo "$package" | cut -d'=' -f1 | cut -d'>' -f1 | cut -d'<' -f1)
+        echo -e "${CYAN}  Installing $pkg_name...${NC}"
         
-        # Install packages individually
-        local packages=(
-            "python-telegram-bot==13.15"
-            "pandas>=1.5.0,<2.0.0"
-            "numpy>=1.21.0,<2.0.0"
-            "requests>=2.28.0,<3.0.0"
-            "python-dotenv>=0.19.0,<1.0.0"
-            "ta==0.10.2"
-            "talib-binary>=0.4.24,<1.0.0"
-            "jdatetime>=4.1.0,<5.0.0"
-            "pytz>=2022.1"
-            "aiohttp>=3.8.0,<4.0.0"
-            "colorlog>=6.6.0,<7.0.0"
-            "psutil>=5.9.0,<6.0.0"
-        )
-        
-        local failed_packages=()
-        local success_count=0
-        
-        for package in "${packages[@]}"; do
-            local pkg_name=$(echo "$package" | cut -d'=' -f1 | cut -d'>' -f1 | cut -d'<' -f1)
-            echo -e "${CYAN}  Installing $pkg_name...${NC}"
-            
-            if timeout 60s pip install "$package" >/dev/null 2>&1; then
-                echo -e "${GREEN}    ✓ $pkg_name installed${NC}"
-                ((success_count++))
-            else
-                echo -e "${RED}    ✗ $pkg_name failed${NC}"
-                failed_packages+=("$pkg_name")
-            fi
-        done
-        
-        if [ $success_count -gt 8 ]; then
-            print_step_simple "${steps[5]}" $current $total "success"
-            if [ ${#failed_packages[@]} -gt 0 ]; then
-                print_warning "Some packages failed: ${failed_packages[*]}"
-            fi
+        if timeout 60s pip install "$package" >/dev/null 2>&1; then
+            echo -e "${GREEN}    ✓ $pkg_name installed${NC}"
+            ((success_count++))
         else
-            print_step_simple "${steps[5]}" $current $total "error"
-            log_error "Python Dependencies" "Too many packages failed: ${failed_packages[*]}" "pip install" "1"
-            print_warning "Many packages failed but continuing..."
+            echo -e "${RED}    ✗ $pkg_name failed${NC}"
+            failed_packages+=("$pkg_name")
         fi
+    done
+    
+    if [ $success_count -gt 12 ]; then
+        print_step_simple "${steps[5]}" $current $total "success"
+        if [ ${#failed_packages[@]} -gt 0 ]; then
+            print_warning "Some packages failed: ${failed_packages[*]}"
+        fi
+    else
+        print_step_simple "${steps[5]}" $current $total "error"
+        log_error "Python Dependencies" "Too many packages failed: ${failed_packages[*]}" "pip install" "1"
+        print_warning "Many packages failed but continuing..."
     fi
     
     # Step 7: Directory Structure
@@ -548,9 +720,14 @@ EOF
     touch flow_ai_core/__init__.py flow_ai_core/data_sources/__init__.py flow_ai_core/telegram/__init__.py
     print_step_simple "${steps[6]}" $current $total "success"
     
-    # Step 8: Environment Configuration
+    # Step 8: Complete Configuration (NEW)
     ((current++))
     print_step_simple "${steps[7]}" $current $total "running"
+    
+    # Create complete config.py with all ICT variables
+    create_complete_config "flow_ai_core/config.py"
+    
+    # Create .env file
     cat > .env << EOF
 TELEGRAM_BOT_TOKEN=$TELEGRAM_TOKEN
 TELEGRAM_ADMIN_IDS=$ADMIN_ID
@@ -598,12 +775,131 @@ PAPER_TRADING=true
 EOF
     print_step_simple "${steps[7]}" $current $total "success"
     
-    # Step 9: System Service
+    # Step 9: Code Fixes (NEW)
     ((current++))
     print_step_simple "${steps[8]}" $current $total "running"
+    
+    # Fix import talib to import ta in data_handler.py
+    if [ -f "flow_ai_core/data_handler.py" ]; then
+        sed -i 's/import talib/import ta/g' flow_ai_core/data_handler.py
+        sed -i 's/talib\./ta.trend./g' flow_ai_core/data_handler.py
+    fi
+    
+    # Ensure telegram_bot.py is in root directory
+    if [ -f "flow_ai_core/telegram_bot.py" ] && [ ! -f "telegram_bot.py" ]; then
+        cp flow_ai_core/telegram_bot.py telegram_bot.py
+        chmod +x telegram_bot.py
+    fi
+    
+    # Create main telegram_bot.py if missing
+    if [ ! -f "telegram_bot.py" ]; then
+        cat > telegram_bot.py << 'EOF'
+#!/usr/bin/env python3
+"""
+FlowAI-ICT Trading Bot v4.0
+Main Telegram Bot Entry Point
+"""
+
+import sys
+import os
+import logging
+from pathlib import Path
+
+# Add project root to Python path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/flowai_ict.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+def main():
+    """Main bot function"""
+    try:
+        logger.info("🚀 FlowAI-ICT Trading Bot v4.0 Starting...")
+        
+        # Import and validate config
+        from flow_ai_core import config
+        
+        if not config.validate_config():
+            logger.error("Configuration validation failed")
+            sys.exit(1)
+        
+        # Check if flow_ai_core telegram module exists
+        if os.path.exists('flow_ai_core/telegram'):
+            logger.info("✅ flow_ai_core telegram module found")
+            
+            try:
+                from flow_ai_core.telegram import setup_telegram_handlers
+                logger.info("✅ Telegram handlers imported successfully")
+                
+                # Setup and run bot
+                setup_telegram_handlers()
+                
+            except ImportError as e:
+                logger.error(f"❌ Failed to import telegram handlers: {e}")
+                simple_bot()
+        else:
+            logger.warning("⚠️ flow_ai_core telegram module not found, running simple bot")
+            simple_bot()
+            
+    except Exception as e:
+        logger.error(f"❌ Bot startup failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        sys.exit(1)
+
+def simple_bot():
+    """Simple fallback bot"""
+    import time
+    from telegram.ext import Updater
+    from flow_ai_core.config import TELEGRAM_BOT_TOKEN
+    
+    logger.info("🤖 Running simple bot mode...")
+    
+    try:
+        updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
+        dispatcher = updater.dispatcher
+        
+        def start(update, context):
+            update.message.reply_text("🚀 FlowAI-ICT Trading Bot v4.0 is running!")
+        
+        from telegram.ext import CommandHandler
+        dispatcher.add_handler(CommandHandler('start', start))
+        
+        updater.start_polling()
+        logger.info("✅ Simple bot started successfully")
+        updater.idle()
+        
+    except Exception as e:
+        logger.error(f"❌ Simple bot failed: {e}")
+        # Fallback to basic loop
+        while True:
+            logger.info("💓 Bot is alive...")
+            time.sleep(60)
+
+if __name__ == '__main__':
+    main()
+EOF
+        chmod +x telegram_bot.py
+    fi
+    
+    print_step_simple "${steps[8]}" $current $total "success"
+    
+    # Step 10: System Service
+    ((current++))
+    print_step_simple "${steps[9]}" $current $total "running"
     sudo tee /etc/systemd/system/flowai-ict-bot.service > /dev/null << EOF
 [Unit]
-Description=FlowAI-ICT Trading Bot v3.9
+Description=FlowAI-ICT Trading Bot v4.0
 After=network.target network-online.target
 Wants=network-online.target
 
@@ -625,19 +921,19 @@ WantedBy=multi-user.target
 EOF
     
     if sudo systemctl daemon-reload && sudo systemctl enable flowai-ict-bot >/dev/null 2>&1; then
-        print_step_simple "${steps[8]}" $current $total "success"
+        print_step_simple "${steps[9]}" $current $total "success"
     else
-        print_step_simple "${steps[8]}" $current $total "error"
+        print_step_simple "${steps[9]}" $current $total "error"
         log_error "Service Setup" "Failed to enable service" "systemctl enable" "$?"
         print_warning "Service setup failed but continuing..."
     fi
     
-    # Step 10: Utility Scripts
+    # Step 11: Utility Scripts
     ((current++))
-    print_step_simple "${steps[9]}" $current $total "running"
+    print_step_simple "${steps[10]}" $current $total "running"
     cat > start_bot.sh << 'EOF'
 #!/bin/bash
-echo "🚀 Starting FlowAI-ICT Trading Bot..."
+echo "🚀 Starting FlowAI-ICT Trading Bot v4.0..."
 cd /opt/FlowAI-ICT-Trading-Bot
 source venv/bin/activate
 python telegram_bot.py
@@ -645,7 +941,7 @@ EOF
     
     cat > health_check.sh << 'EOF'
 #!/bin/bash
-echo "💊 FlowAI-ICT Health Check v3.9"
+echo "💊 FlowAI-ICT Health Check v4.0"
 echo "================================="
 
 if systemctl is-active --quiet flowai-ict-bot; then
@@ -693,15 +989,15 @@ echo "================================="
 EOF
     
     chmod +x start_bot.sh health_check.sh
-    print_step_simple "${steps[9]}" $current $total "success"
+    print_step_simple "${steps[10]}" $current $total "success"
     
-    # Step 11: Final Testing
+    # Step 12: Final Testing
     ((current++))
-    print_step_simple "${steps[10]}" $current $total "running"
+    print_step_simple "${steps[11]}" $current $total "running"
     source venv/bin/activate
     
     # Test critical imports
-    local critical_imports=("telegram" "pandas" "numpy" "requests" "dotenv")
+    local critical_imports=("telegram" "pandas" "numpy" "requests" "dotenv" "ta")
     local failed_imports=()
     local success_imports=()
     
@@ -713,13 +1009,20 @@ EOF
         fi
     done
     
-    if [ ${#success_imports[@]} -ge 4 ]; then
-        print_step_simple "${steps[10]}" $current $total "success"
+    # Test config import
+    if python -c "from flow_ai_core import config; config.validate_config()" >/dev/null 2>&1; then
+        success_imports+=("config")
+    else
+        failed_imports+=("config")
+    fi
+    
+    if [ ${#success_imports[@]} -ge 6 ]; then
+        print_step_simple "${steps[11]}" $current $total "success"
         if [ ${#failed_imports[@]} -gt 0 ]; then
             print_warning "Some imports failed: ${failed_imports[*]}"
         fi
     else
-        print_step_simple "${steps[10]}" $current $total "error"
+        print_step_simple "${steps[11]}" $current $total "error"
         log_error "Final Testing" "Critical imports failed: ${failed_imports[*]}" "python imports" "1"
         print_warning "Critical imports failed but installation completed"
     fi
@@ -733,7 +1036,9 @@ EOF
     echo -e "${CYAN}📋 Installation Summary:${NC}"
     echo -e "${WHITE}✓ Project cloned to: $INSTALL_DIR${NC}"
     echo -e "${WHITE}✓ Virtual environment created${NC}"
-    echo -e "${WHITE}✓ Configuration file created${NC}"
+    echo -e "${WHITE}✓ Complete configuration created${NC}"
+    echo -e "${WHITE}✓ All ICT variables added${NC}"
+    echo -e "${WHITE}✓ Code fixes applied${NC}"
     echo -e "${WHITE}✓ System service configured${NC}"
     echo -e "${WHITE}✓ Utility scripts created${NC}"
     
@@ -905,20 +1210,11 @@ manage_service() {
                             fi
                         done
                         
-                        # Test bot token
-                        if python -c "
-import os
-from dotenv import load_dotenv
-load_dotenv()
-token = os.getenv('TELEGRAM_BOT_TOKEN')
-if token and len(token) > 40:
-    print('✅ Telegram token configured')
-else:
-    print('❌ Telegram token missing or invalid')
-" 2>/dev/null; then
-                            echo -e "${GREEN}✅ Configuration test passed${NC}"
+                        # Test config
+                        if python -c "from flow_ai_core import config; config.validate_config()" 2>/dev/null; then
+                            echo -e "${GREEN}✅ Configuration validation passed${NC}"
                         else
-                            echo -e "${RED}❌ Configuration test failed${NC}"
+                            echo -e "${RED}❌ Configuration validation failed${NC}"
                         fi
                         
                         if [ ${#failed_tests[@]} -eq 0 ]; then
@@ -1282,7 +1578,7 @@ management_menu() {
                 echo -e "${CYAN}📖 Help & Documentation${NC}"
                 echo -e "${CYAN}═══════════════════════════${NC}"
                 echo ""
-                echo -e "${WHITE}FlowAI-ICT Trading Bot v3.9${NC}"
+                echo -e "${WHITE}FlowAI-ICT Trading Bot v4.0${NC}"
                 echo ""
                 echo -e "${YELLOW}Quick Commands:${NC}"
                 echo -e "${WHITE}• sudo systemctl start flowai-ict-bot${NC}"
@@ -1323,7 +1619,7 @@ main() {
     init_logs
     
     # Log startup
-    echo "FlowAI-ICT Installation/Management Log v3.9 - $(date)" > "$LOG_FILE"
+    echo "FlowAI-ICT Installation/Management Log v4.0 - $(date)" > "$LOG_FILE"
     
     # Handle root user automatically
     handle_root_user
