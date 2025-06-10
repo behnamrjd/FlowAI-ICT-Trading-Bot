@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Yahoo Finance Smart Fetcher v3.0 - Complete & Error-Free
-Multi-symbol fallback with all required methods and error handling
+Yahoo Finance Smart Fetcher v3.1 - Enhanced with Real-time Validation
+Multi-symbol fallback with real-time data validation and price accuracy
 Author: Behnam RJD
 """
 
@@ -12,17 +12,19 @@ import pandas as pd
 import pickle
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import numpy as np
+import pytz
 
 logger = logging.getLogger(__name__)
 
-# Gold symbols for fallback
+# Enhanced Gold symbols for fallback with real-time priority
 GOLD_SYMBOLS = [
-    "GC=F",      # Gold Futures (Primary)
-    "GOLD",      # Barrick Gold Corp
-    "IAU",       # iShares Gold Trust ETF
+    "XAUUSD=X",  # Gold/USD Forex (Real-time priority)
+    "GC=F",      # Gold Futures
     "GLD",       # SPDR Gold Shares ETF
-    "XAUUSD=X",  # Gold/USD Forex
+    "IAU",       # iShares Gold Trust ETF
+    "GOLD",      # Barrick Gold Corp
     "^XAU"       # Gold Index
 ]
 
@@ -37,7 +39,7 @@ TEST_SYMBOLS = [
 class YahooCacheManager:
     """Advanced cache manager with memory and disk storage"""
     
-    def __init__(self, cache_dir="cache", cache_duration_hours=1):
+    def __init__(self, cache_dir="cache", cache_duration_hours=0.083):  # 5 minutes default
         self.cache_dir = cache_dir
         self.cache_duration = timedelta(hours=cache_duration_hours)
         os.makedirs(cache_dir, exist_ok=True)
@@ -119,9 +121,9 @@ class YahooCacheManager:
             logger.error(f"Failed to clear disk cache: {e}")
 
 class RobustYahooFetcher:
-    """Complete Yahoo Finance fetcher with all required methods"""
+    """Enhanced Yahoo Finance fetcher with real-time validation"""
     
-    def __init__(self, requests_per_minute=8, cache_duration_hours=1):
+    def __init__(self, requests_per_minute=8, cache_duration_hours=0.083):
         self.requests_per_minute = requests_per_minute
         self.last_request_time = 0
         self.cache_manager = YahooCacheManager(cache_duration_hours=cache_duration_hours)
@@ -160,8 +162,102 @@ class RobustYahooFetcher:
         import threading
         threading.Thread(target=remove_blacklist, daemon=True).start()
     
+    def _validate_data_freshness(self, data, max_delay_minutes=15):
+        """Validate if data is fresh enough for trading"""
+        if data.empty:
+            return False, "No data available"
+        
+        try:
+            latest_time = data.index[-1]
+            
+            # Convert to UTC if timezone-naive
+            if latest_time.tzinfo is None:
+                latest_time = latest_time.replace(tzinfo=timezone.utc)
+            
+            current_time = datetime.now(timezone.utc)
+            delay_minutes = (current_time - latest_time).total_seconds() / 60
+            
+            if delay_minutes > max_delay_minutes:
+                return False, f"Data is {delay_minutes:.1f} minutes old (max: {max_delay_minutes})"
+            
+            return True, f"Data is fresh ({delay_minutes:.1f} minutes old)"
+            
+        except Exception as e:
+            return False, f"Error validating data freshness: {e}"
+    
+    def _get_real_time_price_fallback(self, symbol):
+        """Get real-time price from multiple sources"""
+        fallback_symbols = {
+            'GC=F': ['XAUUSD=X', 'GLD', 'IAU'],
+            'XAUUSD=X': ['GC=F', 'GLD', 'IAU'],
+            'GLD': ['XAUUSD=X', 'GC=F', 'IAU'],
+            'IAU': ['XAUUSD=X', 'GC=F', 'GLD']
+        }
+        
+        symbols_to_try = [symbol] + fallback_symbols.get(symbol, [])
+        
+        for test_symbol in symbols_to_try:
+            try:
+                logger.info(f"Trying real-time fetch for {test_symbol}")
+                data = yf.download(
+                    test_symbol,
+                    period="1d",
+                    interval="1m",
+                    progress=False,
+                    threads=False,
+                    timeout=10,
+                    group_by=None
+                )
+                
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.droplevel(0)
+                
+                if not data.empty:
+                    is_fresh, message = self._validate_data_freshness(data, max_delay_minutes=10)
+                    if is_fresh:
+                        logger.info(f"✅ Fresh real-time data from {test_symbol}: {message}")
+                        logger.info(f"💰 Real-time price: ${data['Close'].iloc[-1]:.2f}")
+                        return data, test_symbol
+                    else:
+                        logger.warning(f"⚠️ Stale real-time data from {test_symbol}: {message}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to fetch real-time from {test_symbol}: {e}")
+                continue
+        
+        return pd.DataFrame(), None
+    
+    def _resample_data(self, data, target_interval):
+        """Resample 1-minute data to target interval"""
+        try:
+            # Mapping intervals to pandas frequency
+            interval_map = {
+                '5m': '5T',
+                '15m': '15T', 
+                '1h': '1H',
+                '4h': '4H',
+                '1d': '1D'
+            }
+            
+            freq = interval_map.get(target_interval, '1H')
+            
+            resampled = data.resample(freq).agg({
+                'Open': 'first',
+                'High': 'max',
+                'Low': 'min',
+                'Close': 'last',
+                'Volume': 'sum'
+            }).dropna()
+            
+            logger.info(f"Resampled data from 1m to {target_interval}: {len(resampled)} candles")
+            return resampled
+            
+        except Exception as e:
+            logger.error(f"Error resampling data: {e}")
+            return data
+    
     def _validate_data(self, data):
-        """Validate data quality - Fixed for pandas Series ambiguity"""
+        """Validate data quality - Enhanced for pandas Series ambiguity"""
         try:
             # Basic existence check
             if data is None or data.empty:
@@ -221,9 +317,8 @@ class RobustYahooFetcher:
             return False
     
     def fetch_single_symbol(self, symbol, period="5d", interval="1h", max_retries=3):
-        """Fetch data for a single symbol with robust error handling"""
+        """Fetch data for a single symbol with enhanced real-time validation"""
         
-        # Skip blacklisted symbols
         if self._is_symbol_blacklisted(symbol):
             logger.debug(f"Skipping blacklisted symbol: {symbol}")
             return pd.DataFrame()
@@ -231,7 +326,14 @@ class RobustYahooFetcher:
         # Check cache first
         cached_data = self.cache_manager.get_cached_data(symbol, period, interval)
         if cached_data is not None:
-            return cached_data
+            # Validate cached data freshness
+            is_fresh, message = self._validate_data_freshness(cached_data, max_delay_minutes=30)
+            if is_fresh:
+                logger.info(f"Using fresh cached data: {message}")
+                logger.info(f"💰 Cached price: ${cached_data['Close'].iloc[-1]:.2f}")
+                return cached_data
+            else:
+                logger.warning(f"Cached data is stale: {message}. Fetching fresh data...")
         
         # Apply rate limiting
         delay = self._calculate_delay()
@@ -239,9 +341,22 @@ class RobustYahooFetcher:
             logger.debug(f"Rate limiting: waiting {delay:.1f} seconds")
             time.sleep(delay)
         
+        # Try real-time fallback first for critical intervals
+        if interval in ['1m', '5m', '15m', '1h']:
+            logger.info(f"🔄 Attempting real-time fetch for {symbol}")
+            real_time_data, successful_symbol = self._get_real_time_price_fallback(symbol)
+            if not real_time_data.empty:
+                # Convert to requested interval if needed
+                if interval != '1m':
+                    real_time_data = self._resample_data(real_time_data, interval)
+                
+                self.cache_manager.save_to_cache(real_time_data, symbol, period, interval)
+                logger.info(f"✅ Real-time data fetched from {successful_symbol}")
+                return real_time_data
+        
+        # Fallback to standard fetch
         for attempt in range(max_retries):
             try:
-                # Smart delay between attempts
                 if attempt > 0:
                     smart_delay = self._smart_delay(attempt)
                     logger.info(f"Retry {attempt + 1} for {symbol}: waiting {smart_delay:.1f} seconds")
@@ -249,7 +364,6 @@ class RobustYahooFetcher:
                 
                 logger.info(f"Fetching {symbol} data (attempt {attempt + 1}/{max_retries})")
                 
-                # Use yfinance with conservative parameters
                 data = yf.download(
                     symbol,
                     period=period,
@@ -259,21 +373,44 @@ class RobustYahooFetcher:
                     auto_adjust=True,
                     actions=False,
                     timeout=30,
-                    group_by=None  # Prevent MultiIndex columns
+                    group_by=None
                 )
                 
-                # Fix MultiIndex columns if they exist
                 if isinstance(data.columns, pd.MultiIndex):
                     data.columns = data.columns.droplevel(0)
                 
                 if data is not None and not data.empty:
-                    # Validate data quality
+                    # Enhanced validation
                     if self._validate_data(data):
+                        # Check data freshness
+                        is_fresh, message = self._validate_data_freshness(data, max_delay_minutes=60)
+                        
+                        if not is_fresh:
+                            logger.warning(f"⚠️ Data freshness issue: {message}")
+                            # Try real-time fallback
+                            real_time_data, successful_symbol = self._get_real_time_price_fallback(symbol)
+                            if not real_time_data.empty:
+                                if interval != '1m':
+                                    real_time_data = self._resample_data(real_time_data, interval)
+                                data = real_time_data
+                                logger.info(f"✅ Used real-time fallback from {successful_symbol}")
+                        
                         self.failed_attempts = 0
                         self.last_request_time = time.time()
                         self.cache_manager.save_to_cache(data, symbol, period, interval)
                         
                         logger.info(f"✅ Successfully fetched {len(data)} records for {symbol}")
+                        logger.info(f"📊 Data range: {data.index[0]} to {data.index[-1]}")
+                        logger.info(f"💰 Latest price: ${data['Close'].iloc[-1]:.2f}")
+                        
+                        # Log data freshness for debugging
+                        latest_time = data.index[-1]
+                        current_time = datetime.now(timezone.utc)
+                        if latest_time.tzinfo is None:
+                            latest_time = latest_time.replace(tzinfo=timezone.utc)
+                        delay_minutes = (current_time - latest_time).total_seconds() / 60
+                        logger.info(f"⏰ Data age: {delay_minutes:.1f} minutes")
+                        
                         return data
                     else:
                         logger.warning(f"Invalid data quality for {symbol}")
@@ -296,7 +433,7 @@ class RobustYahooFetcher:
                         
                 elif any(keyword in error_str for keyword in ['delisted', 'no price data', 'not found']):
                     logger.error(f"❌ Symbol {symbol} appears to be delisted or invalid")
-                    self._blacklist_symbol(symbol, 60)  # Blacklist for 1 hour
+                    self._blacklist_symbol(symbol, 60)
                     break
                     
                 elif any(keyword in error_str for keyword in ['network', 'connection', 'timeout']):
@@ -317,7 +454,7 @@ class RobustYahooFetcher:
         return pd.DataFrame()
     
     def fetch_data_with_fallback(self, symbols, period="5d", interval="1h"):
-        """Fetch data with symbol fallback - REQUIRED METHOD"""
+        """Fetch data with symbol fallback - Enhanced with real-time priority"""
         
         if isinstance(symbols, str):
             symbols = [symbols]
@@ -334,21 +471,21 @@ class RobustYahooFetcher:
         return pd.DataFrame(), None
     
     def reset(self):
-        """Reset fetcher state - REQUIRED METHOD"""
+        """Reset fetcher state"""
         self.failed_attempts = 0
         self.blacklisted_symbols.clear()
         logger.info("Yahoo fetcher reset")
 
-# Global instance with conservative settings
-_robust_fetcher = RobustYahooFetcher(requests_per_minute=8)
+# Global instance with enhanced settings
+_robust_fetcher = RobustYahooFetcher(requests_per_minute=8, cache_duration_hours=0.083)
 
 def fetch_yahoo_data_smart(symbol, period="5d", interval="1h"):
-    """Main function with single symbol"""
+    """Main function with single symbol - Enhanced"""
     data, _ = _robust_fetcher.fetch_data_with_fallback([symbol], period, interval)
     return data
 
 def fetch_gold_data_robust(period="5d", interval="1h"):
-    """Fetch gold data with multiple symbol fallbacks"""
+    """Fetch gold data with enhanced real-time fallbacks"""
     data, successful_symbol = _robust_fetcher.fetch_data_with_fallback(GOLD_SYMBOLS, period, interval)
     
     if data.empty:
@@ -357,6 +494,7 @@ def fetch_gold_data_robust(period="5d", interval="1h"):
     
     if not data.empty and successful_symbol:
         logger.info(f"Gold data retrieved using symbol: {successful_symbol}")
+        logger.info(f"💰 Current gold price: ${data['Close'].iloc[-1]:.2f}")
     
     return data
 
@@ -370,7 +508,7 @@ def fetch_symbol_with_alternatives(primary_symbol, alternatives=None, period="5d
     return data, successful_symbol
 
 def reset_yahoo_fetcher():
-    """Reset the global fetcher - REQUIRED FUNCTION"""
+    """Reset the global fetcher"""
     global _robust_fetcher
     _robust_fetcher.reset()
 
@@ -388,37 +526,69 @@ def fetch_symbol_data(symbol, period="5d", interval="1h"):
     """Fetch any symbol with error handling"""
     return fetch_yahoo_data_smart(symbol, period, interval)
 
-# Test function for debugging
+# Enhanced test function
 def test_all_gold_symbols():
-    """Test all gold symbols to see which ones work"""
+    """Test all gold symbols with real-time validation"""
     results = {}
     
     for symbol in GOLD_SYMBOLS:
         try:
-            data = yf.download(symbol, period="5d", interval="1h", progress=False, group_by=None)
+            logger.info(f"Testing {symbol}...")
+            data = yf.download(symbol, period="1d", interval="1h", progress=False, group_by=None)
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.droplevel(0)
-            results[symbol] = len(data) if not data.empty else 0
+            
+            if not data.empty:
+                latest_price = data['Close'].iloc[-1]
+                latest_time = data.index[-1]
+                current_time = datetime.now(timezone.utc)
+                
+                if latest_time.tzinfo is None:
+                    latest_time = latest_time.replace(tzinfo=timezone.utc)
+                
+                delay_minutes = (current_time - latest_time).total_seconds() / 60
+                
+                results[symbol] = {
+                    'records': len(data),
+                    'price': f"${latest_price:.2f}",
+                    'delay_minutes': f"{delay_minutes:.1f}",
+                    'status': 'Fresh' if delay_minutes < 30 else 'Stale'
+                }
+            else:
+                results[symbol] = {'status': 'No data'}
+                
         except Exception as e:
-            results[symbol] = f"Error: {str(e)[:50]}"
+            results[symbol] = {'status': f"Error: {str(e)[:50]}"}
     
     return results
 
 if __name__ == "__main__":
-    # Test the fetcher
-    print("Testing Yahoo Finance Smart Fetcher...")
+    # Enhanced test with real-time validation
+    print("Testing Enhanced Yahoo Finance Smart Fetcher...")
     
-    # Test gold symbols
-    print("\n1. Testing gold symbols:")
+    # Test gold symbols with real-time validation
+    print("\n1. Testing gold symbols with real-time validation:")
     results = test_all_gold_symbols()
     for symbol, result in results.items():
-        print(f"  {symbol}: {result}")
+        if isinstance(result, dict) and 'price' in result:
+            print(f"  {symbol}: {result['records']} records, Price: {result['price']}, "
+                  f"Age: {result['delay_minutes']}min ({result['status']})")
+        else:
+            print(f"  {symbol}: {result}")
     
-    # Test robust fetcher
-    print("\n2. Testing robust fetcher:")
+    # Test enhanced fetcher
+    print("\n2. Testing enhanced robust fetcher:")
     data = fetch_gold_data_robust()
     if not data.empty:
+        latest_time = data.index[-1]
+        current_time = datetime.now(timezone.utc)
+        if latest_time.tzinfo is None:
+            latest_time = latest_time.replace(tzinfo=timezone.utc)
+        delay_minutes = (current_time - latest_time).total_seconds() / 60
+        
         print(f"  ✅ Success: {len(data)} records")
-        print(f"  Latest price: ${data['Close'].iloc[-1]:.2f}")
+        print(f"  💰 Latest price: ${data['Close'].iloc[-1]:.2f}")
+        print(f"  ⏰ Data age: {delay_minutes:.1f} minutes")
+        print(f"  📊 Data range: {data.index[0]} to {data.index[-1]}")
     else:
         print("  ❌ Failed to fetch gold data")

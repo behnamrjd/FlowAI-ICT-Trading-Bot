@@ -246,34 +246,82 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
 
-def get_processed_data(symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
+def get_processed_data(symbol: str, timeframe: str = "1h", limit: int = 1000) -> pd.DataFrame:
     """
-    Get processed data with technical indicators
-    
-    Args:
-        symbol: Trading symbol
-        timeframe: Timeframe
-        limit: Maximum number of candles
-    
-    Returns:
-        DataFrame with OHLCV data and technical indicators
+    Get processed data with enhanced validation and real-time checks
     """
     try:
-        # Fetch raw data
-        df = fetch_ohlcv_data(symbol, timeframe, limit)
+        from . import config
         
-        if df.empty:
-            logger.error(f"No data available for {symbol}")
+        # Enhanced data fetching with validation
+        logger.info(f"Fetching {symbol} data with enhanced validation...")
+        
+        # Get raw data
+        raw_data = fetch_yahoo_data_smart(symbol, period="5d", interval=timeframe)
+        
+        if raw_data.empty:
+            logger.warning(f"No raw data received for {symbol}")
+            
+            # Try fallback symbols if enabled
+            if hasattr(config, 'ENABLE_REAL_TIME_FALLBACK') and config.ENABLE_REAL_TIME_FALLBACK:
+                fallback_symbols = getattr(config, 'FALLBACK_SYMBOLS', ['GC=F', 'GLD'])
+                
+                for fallback_symbol in fallback_symbols:
+                    logger.info(f"Trying fallback symbol: {fallback_symbol}")
+                    raw_data = fetch_yahoo_data_smart(fallback_symbol, period="5d", interval=timeframe)
+                    
+                    if not raw_data.empty:
+                        logger.info(f"✅ Success with fallback symbol: {fallback_symbol}")
+                        break
+            
+            if raw_data.empty:
+                logger.error(f"All data sources failed for {symbol}")
+                return pd.DataFrame()
+        
+        # Validate data quality
+        if hasattr(config, 'VALIDATE_DATA_FRESHNESS') and config.VALIDATE_DATA_FRESHNESS:
+            latest_time = raw_data.index[-1]
+            current_time = datetime.now(timezone.utc)
+            
+            if latest_time.tzinfo is None:
+                latest_time = latest_time.replace(tzinfo=timezone.utc)
+            
+            delay_minutes = (current_time - latest_time).total_seconds() / 60
+            max_delay = getattr(config, 'MAX_DATA_DELAY_MINUTES', 30)
+            
+            if delay_minutes > max_delay:
+                logger.warning(f"⚠️ Data is {delay_minutes:.1f} minutes old (max: {max_delay})")
+                
+                # Log price comparison for debugging
+                latest_price = raw_data['Close'].iloc[-1]
+                logger.info(f"📊 Using price: ${latest_price:.2f} from {latest_time}")
+            else:
+                logger.info(f"✅ Data is fresh ({delay_minutes:.1f} minutes old)")
+        
+        # Process the data
+        processed_data = process_raw_data(raw_data)
+        
+        if processed_data.empty:
+            logger.error("Data processing failed")
             return pd.DataFrame()
         
         # Add technical indicators
-        df = add_technical_indicators(df)
+        processed_data = add_technical_indicators(processed_data)
         
-        logger.info(f"Processed data ready: {len(df)} candles with indicators")
-        return df
+        # Limit data if requested
+        if limit and len(processed_data) > limit:
+            processed_data = processed_data.tail(limit)
+        
+        logger.info(f"✅ Processed {len(processed_data)} candles for {symbol}")
+        logger.info(f"📊 Price range: ${processed_data['Close'].min():.2f} - ${processed_data['Close'].max():.2f}")
+        logger.info(f"💰 Latest price: ${processed_data['Close'].iloc[-1]:.2f}")
+        
+        return processed_data
         
     except Exception as e:
-        logger.error(f"Error getting processed data: {e}")
+        logger.error(f"Error getting processed data for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 def get_htf_data(symbol: str, timeframes: List[str]) -> Dict[str, pd.DataFrame]:

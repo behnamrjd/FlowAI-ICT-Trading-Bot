@@ -178,3 +178,28 @@ MODEL_METADATA_PATH = get_env_var("MODEL_METADATA_PATH", "model_metadata.pkl")
 # ===== TIMEZONE CONFIGURATION =====
 TIMEZONE = get_env_var('TIMEZONE', 'Asia/Tehran')
 UTC_OFFSET = '+0330'
+
+# ===== ENHANCED DATA CONFIGURATION =====
+# Primary and fallback symbols for better data quality
+PRIMARY_SYMBOLS = {
+    'GOLD': ['XAUUSD=X', 'GC=F', 'GLD', 'IAU'],
+    'SILVER': ['XAGUSD=X', 'SI=F', 'SLV'],
+    'OIL': ['CL=F', 'USO', 'XOM']
+}
+
+# Data quality settings
+MAX_DATA_DELAY_MINUTES = get_env_var('MAX_DATA_DELAY_MINUTES', 15, var_type=int)
+ENABLE_REAL_TIME_FALLBACK = get_env_var('ENABLE_REAL_TIME_FALLBACK', True, var_type=bool)
+CACHE_DURATION_MINUTES = get_env_var('CACHE_DURATION_MINUTES', 5, var_type=int)
+
+# Enhanced symbol configuration
+SYMBOL = get_env_var("SYMBOL", "XAUUSD=X")  # Changed from GC=F
+FALLBACK_SYMBOLS = get_env_var("FALLBACK_SYMBOLS", "GC=F,GLD,IAU", var_type=list)
+
+# Real-time data validation
+VALIDATE_DATA_FRESHNESS = get_env_var('VALIDATE_DATA_FRESHNESS', True, var_type=bool)
+MIN_CANDLES_FOR_ANALYSIS = get_env_var('MIN_CANDLES_FOR_ANALYSIS', 50, var_type=int)
+
+# Price validation thresholds
+MAX_PRICE_DEVIATION_PCT = get_env_var('MAX_PRICE_DEVIATION_PCT', 5.0, var_type=float)
+ENABLE_PRICE_VALIDATION = get_env_var('ENABLE_PRICE_VALIDATION', True, var_type=bool)
