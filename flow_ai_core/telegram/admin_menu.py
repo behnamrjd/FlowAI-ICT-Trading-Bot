@@ -3,7 +3,8 @@ from telegram.ext import CallbackContext, CommandHandler, MessageHandler, Filter
 import logging
 import asyncio
 from ..data_sources.brsapi_fetcher import get_brsapi_status, get_brsapi_gold_price
-from ..config import TELEGRAM_ADMIN_IDS
+from ..config import TELEGRAM_ADMIN_IDS, ICT_ENABLED, AI_MODEL_ENABLED
+from ..data_handler import get_processed_data, get_ict_analysis, ict_data_handler
 from ..telegram.signal_manager import signal_manager, start_signal_monitoring, stop_signal_monitoring, get_signal_stats
 from ..ai_signal_engine import get_ai_trading_signal, get_market_status
 from ..backtest_engine import run_backtest_analysis, get_backtest_summary
@@ -14,11 +15,17 @@ from ..notification_system import send_system_alert, get_notification_stats
 
 logger = logging.getLogger(__name__)
 
-class AdminMenu:
+class ICTAdminMenu:
     def __init__(self):
         self.admin_ids = TELEGRAM_ADMIN_IDS
-        self.pending_actions = {}  # برای ذخیره اقدامات در انتظار
-        logger.info(f"Admin menu initialized with IDs: {self.admin_ids}")
+        self.pending_actions = {}
+        self.ict_settings = {
+            'order_blocks': True,
+            'fair_value_gaps': True,
+            'liquidity_sweeps': True,
+            'market_structure': True
+        }
+        logger.info(f"ICT Admin menu initialized with IDs: {self.admin_ids}")
     
     def is_admin(self, user_id: int) -> bool:
         """بررسی ادمین بودن کاربر"""
@@ -27,133 +34,115 @@ class AdminMenu:
         return is_admin
     
     def main_menu_keyboard(self):
-        """منوی اصلی ادمین با دکمه‌های زیبا"""
+        """منوی اصلی ادمین ICT-Enhanced"""
         keyboard = [
             [
-                KeyboardButton("🤖 مدیریت ربات"),
-                KeyboardButton("📊 آمار و گزارش")
+                KeyboardButton("🎯 ICT Dashboard"),
+                KeyboardButton("🤖 AI & Signals")
             ],
             [
-                KeyboardButton("🚨 مدیریت سیگنال‌ها"),
-                KeyboardButton("👥 مدیریت کاربران")
+                KeyboardButton("📊 Market Analysis"),
+                KeyboardButton("🧪 ICT Backtest")
             ],
             [
-                KeyboardButton("🧪 بک‌تست"),
-                KeyboardButton("⚠️ مدیریت ریسک")
+                KeyboardButton("👥 User Management"),
+                KeyboardButton("⚠️ Risk Control")
             ],
             [
-                KeyboardButton("📋 گزارش‌گیری"),
-                KeyboardButton("🔔 اطلاع‌رسانی")
+                KeyboardButton("📋 Reports & Analytics"),
+                KeyboardButton("🔔 Notifications")
             ],
             [
-                KeyboardButton("💰 قیمت فعلی"),
-                KeyboardButton("📡 وضعیت API")
-            ],
-            [
-                KeyboardButton("🔍 تحلیل فوری"),
-                KeyboardButton("⚙️ تنظیمات سیستم")
+                KeyboardButton("💰 Live Price"),
+                KeyboardButton("⚙️ ICT Settings")
             ]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
-    def bot_management_keyboard(self):
-        """منوی مدیریت ربات"""
+    def ict_dashboard_keyboard(self):
+        """منوی ICT Dashboard"""
         keyboard = [
             [
-                InlineKeyboardButton("🟢 شروع ربات", callback_data="bot_start"),
-                InlineKeyboardButton("🔴 توقف ربات", callback_data="bot_stop")
+                InlineKeyboardButton("📈 Order Blocks", callback_data="ict_order_blocks"),
+                InlineKeyboardButton("🔄 Fair Value Gaps", callback_data="ict_fvg")
             ],
             [
-                InlineKeyboardButton("📊 وضعیت API", callback_data="api_status"),
-                InlineKeyboardButton("💰 قیمت فعلی", callback_data="current_price")
+                InlineKeyboardButton("💧 Liquidity Sweeps", callback_data="ict_liquidity"),
+                InlineKeyboardButton("🏗️ Market Structure", callback_data="ict_structure")
             ],
             [
-                InlineKeyboardButton("📋 لاگ‌ها", callback_data="view_logs"),
-                InlineKeyboardButton("🔄 ریستارت", callback_data="bot_restart")
+                InlineKeyboardButton("🎯 ICT Signals", callback_data="ict_signals"),
+                InlineKeyboardButton("📊 Pattern Stats", callback_data="ict_stats")
             ],
             [
-                InlineKeyboardButton("⚙️ تنظیمات", callback_data="bot_settings"),
-                InlineKeyboardButton("🧪 بک‌تست", callback_data="backtest_menu")
+                InlineKeyboardButton("⚙️ ICT Config", callback_data="ict_config"),
+                InlineKeyboardButton("🔄 Refresh Data", callback_data="ict_refresh")
             ],
             [
-                InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")
+                InlineKeyboardButton("🔙 Back", callback_data="main_menu")
             ]
         ]
         return InlineKeyboardMarkup(keyboard)
     
-    def signal_management_keyboard(self):
-        """منوی مدیریت سیگنال‌ها"""
+    def ai_signals_keyboard(self):
+        """منوی AI & Signals"""
         keyboard = [
             [
-                InlineKeyboardButton("▶️ شروع نظارت", callback_data="start_monitoring"),
-                InlineKeyboardButton("⏹️ توقف نظارت", callback_data="stop_monitoring")
+                InlineKeyboardButton("🚀 Start Monitoring", callback_data="start_monitoring"),
+                InlineKeyboardButton("⏹️ Stop Monitoring", callback_data="stop_monitoring")
             ],
             [
-                InlineKeyboardButton("🔍 تحلیل فوری", callback_data="force_analysis"),
-                InlineKeyboardButton("📊 آمار سیگنال‌ها", callback_data="signal_stats")
+                InlineKeyboardButton("🔍 Force Analysis", callback_data="force_analysis"),
+                InlineKeyboardButton("🎯 ICT + AI Signal", callback_data="ict_ai_signal")
             ],
             [
-                InlineKeyboardButton("📈 عملکرد", callback_data="signal_performance"),
-                InlineKeyboardButton("⚙️ تنظیمات", callback_data="signal_settings")
+                InlineKeyboardButton("📊 Signal Stats", callback_data="signal_stats"),
+                InlineKeyboardButton("🤖 AI Model Status", callback_data="ai_model_status")
             ],
             [
-                InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")
+                InlineKeyboardButton("⚙️ Signal Settings", callback_data="signal_settings"),
+                InlineKeyboardButton("🔄 Retrain Model", callback_data="retrain_model")
+            ],
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="main_menu")
             ]
         ]
         return InlineKeyboardMarkup(keyboard)
     
-    def user_management_keyboard(self):
-        """منوی مدیریت کاربران"""
+    def market_analysis_keyboard(self):
+        """منوی تحلیل بازار"""
         keyboard = [
             [
-                InlineKeyboardButton("➕ اضافه کردن پریمیوم", callback_data="add_premium_user"),
-                InlineKeyboardButton("➖ حذف پریمیوم", callback_data="remove_premium_user")
+                InlineKeyboardButton("📈 HTF Analysis", callback_data="htf_analysis"),
+                InlineKeyboardButton("⏰ LTF Analysis", callback_data="ltf_analysis")
             ],
             [
-                InlineKeyboardButton("📋 لیست پریمیوم", callback_data="list_premium_users"),
-                InlineKeyboardButton("📊 آمار کاربران", callback_data="user_statistics")
+                InlineKeyboardButton("🎯 Multi-Timeframe", callback_data="multi_tf_analysis"),
+                InlineKeyboardButton("📊 Technical Indicators", callback_data="technical_indicators")
             ],
             [
-                InlineKeyboardButton("📜 تاریخچه", callback_data="premium_history"),
-                InlineKeyboardButton("💾 پشتیبان‌گیری", callback_data="backup_users")
+                InlineKeyboardButton("🔍 Pattern Scanner", callback_data="pattern_scanner"),
+                InlineKeyboardButton("💹 Market Sessions", callback_data="market_sessions")
             ],
             [
-                InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")
-            ]
-        ]
-        return InlineKeyboardMarkup(keyboard)
-    
-    def backtest_keyboard(self):
-        """منوی بک‌تست"""
-        keyboard = [
-            [
-                InlineKeyboardButton("▶️ شروع بک‌تست", callback_data="start_backtest"),
-                InlineKeyboardButton("⏹️ توقف بک‌تست", callback_data="stop_backtest")
+                InlineKeyboardButton("📋 Full Report", callback_data="full_market_report"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="refresh_analysis")
             ],
             [
-                InlineKeyboardButton("📊 نتایج آخرین", callback_data="last_backtest_results"),
-                InlineKeyboardButton("📈 تاریخچه", callback_data="backtest_history")
-            ],
-            [
-                InlineKeyboardButton("⚙️ تنظیم پارامترها", callback_data="backtest_settings"),
-                InlineKeyboardButton("📁 دانلود گزارش", callback_data="download_backtest_report")
-            ],
-            [
-                InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")
+                InlineKeyboardButton("🔙 Back", callback_data="main_menu")
             ]
         ]
         return InlineKeyboardMarkup(keyboard)
 
 # Instance global
-admin_menu = AdminMenu()
+admin_menu = ICTAdminMenu()
 
-# Handler Functions
 def start_admin(update: Update, context: CallbackContext):
-    """شروع منوی ادمین"""
+    """شروع منوی ادمین ICT"""
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     
-    logger.info(f"Admin command received from user {user_id} ({user_name})")
+    logger.info(f"ICT Admin command received from user {user_id} ({user_name})")
     
     if not admin_menu.is_admin(user_id):
         update.message.reply_text(f"⛔ شما دسترسی ادمین ندارید!\n\nID شما: `{user_id}`", parse_mode='Markdown')
@@ -167,19 +156,35 @@ def start_admin(update: Update, context: CallbackContext):
         signal_stats = get_signal_stats()
         risk_stats = get_risk_status()
         
+        # دریافت تحلیل ICT
+        ict_analysis = get_ict_analysis()
+        
         welcome_text = f"""
-🎛️ **پنل مدیریت FlowAI Trading Bot**
+🎯 **FlowAI-ICT Trading Bot Admin Panel**
 
 سلام {user_name} عزیز! 👋
-به پنل مدیریت ربات خوش آمدید.
+به پنل مدیریت ربات ICT خوش آمدید.
 
-📊 **وضعیت فعلی:**
-💰 قیمت طلا: ${current_price:.2f}
-📡 API calls: {api_status['daily_calls']}/{api_status['daily_limit']}
-🔋 مصرف روزانه: {api_status['daily_usage_percent']:.1f}%
-🚨 کل سیگنال‌ها: {signal_stats['total_signals']}
-⚡ نظارت: {'فعال' if signal_manager.running else 'غیرفعال'}
-💼 PnL روزانه: ${risk_stats['daily_pnl']:.2f}
+💰 **Market Data:**
+🔹 Gold Price: ${current_price:.2f}
+🔹 ICT Signal: {ict_analysis.get('signal', 'HOLD')}
+🔹 Confidence: {ict_analysis.get('confidence', 0):.1%}
+
+📡 **System Status:**
+🔹 API Calls: {api_status['daily_calls']}/{api_status['daily_limit']}
+🔹 Usage: {api_status['daily_usage_percent']:.1f}%
+🔹 Signals Today: {signal_stats['total_signals']}
+🔹 Monitoring: {'🟢 Active' if signal_manager.running else '🔴 Inactive'}
+
+🎯 **ICT Features:**
+🔹 ICT Engine: {'🟢 Enabled' if ICT_ENABLED else '🔴 Disabled'}
+🔹 AI Model: {'🟢 Active' if AI_MODEL_ENABLED else '🔴 Inactive'}
+🔹 Order Blocks: {'✅' if admin_menu.ict_settings['order_blocks'] else '❌'}
+🔹 Fair Value Gaps: {'✅' if admin_menu.ict_settings['fair_value_gaps'] else '❌'}
+
+⚠️ **Risk Status:**
+🔹 Daily PnL: ${risk_stats['daily_pnl']:.2f}
+🔹 Trades Today: {risk_stats['daily_trades']}/{risk_stats['max_daily_trades']}
 
 از منوی زیر گزینه مورد نظر را انتخاب کنید:
 """
@@ -193,7 +198,7 @@ def start_admin(update: Update, context: CallbackContext):
     except Exception as e:
         logger.error(f"Error in start_admin: {e}")
         update.message.reply_text(
-            f"🎛️ **پنل مدیریت FlowAI**\n\nسلام {user_name}!\nخوش آمدید به پنل مدیریت.",
+            f"🎯 **FlowAI-ICT Admin Panel**\n\nسلام {user_name}!\nخوش آمدید به پنل مدیریت ICT.",
             reply_markup=admin_menu.main_menu_keyboard(),
             parse_mode='Markdown'
         )
@@ -206,241 +211,141 @@ def handle_admin_menu(update: Update, context: CallbackContext):
         return
     
     text = update.message.text
-    logger.info(f"Admin menu action: {text} by user {user_id}")
+    logger.info(f"ICT Admin menu action: {text} by user {user_id}")
     
-    if text == "🤖 مدیریت ربات":
-        update.message.reply_text(
-            "🤖 **مدیریت ربات FlowAI**\n\nگزینه مورد نظر را انتخاب کنید:",
-            reply_markup=admin_menu.bot_management_keyboard(),
-            parse_mode='Markdown'
-        )
-    
-    elif text == "🚨 مدیریت سیگنال‌ها":
+    if text == "🎯 ICT Dashboard":
         try:
-            stats = get_signal_stats()
+            # دریافت آمار ICT
+            data = get_processed_data("GOLD", "1h", 100)
+            ict_analysis = get_ict_analysis()
+            
+            if not data.empty:
+                # شمارش patterns
+                order_blocks = data['Bullish_OB'].sum() + data['Bearish_OB'].sum()
+                fvgs = data['Bullish_FVG'].sum() + data['Bearish_FVG'].sum()
+                liquidity_sweeps = data['Buy_Side_Liquidity_Sweep'].sum() + data['Sell_Side_Liquidity_Sweep'].sum()
+                
+                latest = data.iloc[-1]
+                
+                ict_text = f"""
+🎯 **ICT Dashboard - Live Analysis**
+
+📊 **Current Market State:**
+🔹 Signal: {ict_analysis.get('signal', 'HOLD')}
+🔹 Confidence: {ict_analysis.get('confidence', 0):.1%}
+🔹 Market Structure: {latest.get('Market_Structure', 'NEUTRAL')}
+
+📈 **Pattern Detection (Last 100 Candles):**
+🔹 Order Blocks: {order_blocks}
+🔹 Fair Value Gaps: {fvgs}
+🔹 Liquidity Sweeps: {liquidity_sweeps}
+
+🎯 **Latest Candle Analysis:**
+🔹 Bullish OB: {'✅' if latest.get('Bullish_OB', False) else '❌'}
+🔹 Bearish OB: {'✅' if latest.get('Bearish_OB', False) else '❌'}
+🔹 Bullish FVG: {'✅' if latest.get('Bullish_FVG', False) else '❌'}
+🔹 Bearish FVG: {'✅' if latest.get('Bearish_FVG', False) else '❌'}
+🔹 Buy Liquidity Sweep: {'✅' if latest.get('Buy_Side_Liquidity_Sweep', False) else '❌'}
+🔹 Sell Liquidity Sweep: {'✅' if latest.get('Sell_Side_Liquidity_Sweep', False) else '❌'}
+
+📊 **Technical Indicators:**
+🔹 RSI: {latest.get('RSI', 0):.1f}
+🔹 MACD: {latest.get('MACD', 0):.3f}
+🔹 ATR: {latest.get('ATR', 0):.4f}
+
+⏰ **Last Update:** {data.index[-1].strftime('%Y-%m-%d %H:%M')}
+"""
+            else:
+                ict_text = "❌ **ICT Dashboard**\n\nNo data available for analysis."
+            
+            update.message.reply_text(
+                ict_text,
+                reply_markup=admin_menu.ict_dashboard_keyboard(),
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            update.message.reply_text(f"❌ خطا در ICT Dashboard: {str(e)}")
+    
+    elif text == "🤖 AI & Signals":
+        try:
+            signal_stats = get_signal_stats()
             market_status = get_market_status()
             
-            signal_text = f"""
-🚨 **مدیریت سیگنال‌های AI**
+            ai_text = f"""
+🤖 **AI & Signal Management**
 
-📊 **آمار سیگنال‌ها:**
-🔹 کل سیگنال‌ها: {stats['total_signals']}
-🔹 سیگنال‌های خرید: {stats['buy_signals']}
-🔹 سیگنال‌های فروش: {stats['sell_signals']}
-🔹 میانگین اعتماد: {stats['avg_confidence']:.1%}
+🚨 **Signal Statistics:**
+🔹 Total Signals: {signal_stats['total_signals']}
+🔹 Buy Signals: {signal_stats['buy_signals']}
+🔹 Sell Signals: {signal_stats['sell_signals']}
+🔹 Average Confidence: {signal_stats['avg_confidence']:.1%}
 
-👥 **مشترکین:**
-🔹 ادمین: {stats['subscribers_count']['admin']}
-🔹 پریمیوم: {stats['subscribers_count']['premium']}
-🔹 رایگان: {stats['subscribers_count']['free']}
+👥 **Subscribers:**
+🔹 Admins: {signal_stats['subscribers_count']['admin']}
+🔹 Premium: {signal_stats['subscribers_count']['premium']}
+🔹 Free: {signal_stats['subscribers_count']['free']}
 
-🏪 **وضعیت بازار:**
-🔹 فعالیت: {'فعال' if market_status['market_active'] else 'بسته'}
-🔹 کولداون: {market_status['cooldown_remaining']:.0f}s
+🏪 **Market Status:**
+🔹 Active: {'✅' if market_status['market_active'] else '❌'}
+🔹 Cooldown: {market_status['cooldown_remaining']:.0f}s
 
-⚡ **نظارت خودکار:** {'فعال' if signal_manager.running else 'غیرفعال'}
+🤖 **AI Model:**
+🔹 Status: {'🟢 Active' if AI_MODEL_ENABLED else '🔴 Inactive'}
+🔹 ICT Integration: {'🟢 Enabled' if ICT_ENABLED else '🔴 Disabled'}
+
+⚡ **Monitoring:** {'🟢 Active' if signal_manager.running else '🔴 Inactive'}
 """
             
             update.message.reply_text(
-                signal_text,
-                reply_markup=admin_menu.signal_management_keyboard(),
+                ai_text,
+                reply_markup=admin_menu.ai_signals_keyboard(),
                 parse_mode='Markdown'
             )
-        except Exception as e:
-            update.message.reply_text(f"❌ خطا در دریافت اطلاعات سیگنال: {str(e)}")
-    
-    elif text == "👥 مدیریت کاربران":
-        try:
-            premium_stats = get_premium_stats()
             
-            user_text = f"""
-👥 **مدیریت کاربران**
-
-📊 **آمار کاربران پریمیوم:**
-🔹 کل کاربران پریمیوم: {premium_stats['total_premium_users']}
-🔹 اضافه شده این ماه: {premium_stats['recent_additions']}
-🔹 حذف شده این ماه: {premium_stats['recent_removals']}
-🔹 کل تاریخچه: {premium_stats['total_history_entries']}
-
-👥 **مشترکین سیگنال:**
-🔹 ادمین: {len(signal_manager.subscribers['admin'])}
-🔹 پریمیوم: {len(signal_manager.subscribers['premium'])}
-🔹 رایگان: {len(signal_manager.subscribers['free'])}
-"""
-            
-            update.message.reply_text(
-                user_text,
-                reply_markup=admin_menu.user_management_keyboard(),
-                parse_mode='Markdown'
-            )
         except Exception as e:
-            update.message.reply_text(f"❌ خطا در دریافت آمار کاربران: {str(e)}")
+            update.message.reply_text(f"❌ خطا در AI & Signals: {str(e)}")
     
-    elif text == "🧪 بک‌تست":
+    elif text == "📊 Market Analysis":
         update.message.reply_text(
-            "🧪 **مدیریت بک‌تست**\n\nگزینه مورد نظر را انتخاب کنید:",
-            reply_markup=admin_menu.backtest_keyboard(),
+            "📊 **Market Analysis Center**\n\nSelect analysis type:",
+            reply_markup=admin_menu.market_analysis_keyboard(),
             parse_mode='Markdown'
         )
     
-    elif text == "📋 گزارش‌گیری":
+    elif text == "💰 Live Price":
         try:
-            # تولید گزارش روزانه
-            daily_report = export_daily_report_text()
-            
-            # ارسال گزارش
-            update.message.reply_text(daily_report, parse_mode='Markdown')
-            
-            # منوی گزارش‌گیری
-            keyboard = [
-                [
-                    InlineKeyboardButton("📊 گزارش روزانه", callback_data="daily_report"),
-                    InlineKeyboardButton("📈 گزارش هفتگی", callback_data="weekly_report")
-                ],
-                [
-                    InlineKeyboardButton("📁 دانلود گزارش", callback_data="download_report"),
-                    InlineKeyboardButton("📧 ارسال ایمیل", callback_data="email_report")
-                ]
-            ]
-            
-            update.message.reply_text(
-                "📋 **گزارش‌گیری سیستم**\n\nگزینه مورد نظر را انتخاب کنید:",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode='Markdown'
-            )
-            
-        except Exception as e:
-            update.message.reply_text(f"❌ خطا در تولید گزارش: {str(e)}")
-    
-    elif text == "🔔 اطلاع‌رسانی":
-        try:
-            notification_stats = get_notification_stats()
-            
-            notification_text = f"""
-🔔 **سیستم اطلاع‌رسانی**
-
-📊 **آمار کلی:**
-🔹 کل اطلاع‌رسانی‌ها: {notification_stats.get('total_notifications', 0)}
-🔹 موفق: {notification_stats.get('total_sent', 0)}
-🔹 ناموفق: {notification_stats.get('total_failed', 0)}
-🔹 نرخ موفقیت: {notification_stats.get('success_rate', 0):.1%}
-
-📱 **کانال‌های فعال:**
-🔹 تلگرام: فعال
-🔹 ایمیل: {'فعال' if notification_stats.get('channel_breakdown', {}).get('email') else 'غیرفعال'}
-🔹 Webhook: {'فعال' if notification_stats.get('channel_breakdown', {}).get('webhook') else 'غیرفعال'}
-"""
-            
-            keyboard = [
-                [
-                    InlineKeyboardButton("📱 تست تلگرام", callback_data="test_telegram"),
-                    InlineKeyboardButton("📧 تست ایمیل", callback_data="test_email")
-                ],
-                [
-                    InlineKeyboardButton("🚨 ارسال هشدار", callback_data="send_alert"),
-                    InlineKeyboardButton("📊 آمار کامل", callback_data="notification_stats")
-                ]
-            ]
-            
-            update.message.reply_text(
-                notification_text,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode='Markdown'
-            )
-            
-        except Exception as e:
-            update.message.reply_text(f"❌ خطا در سیستم اطلاع‌رسانی: {str(e)}")
-    
-    elif text == "📊 آمار و گزارش":
-        try:
-            api_status = get_brsapi_status()
             current_price = get_brsapi_gold_price()
-            signal_stats = get_signal_stats()
-            risk_stats = get_risk_status()
-            premium_stats = get_premium_stats()
+            api_status = get_brsapi_status()
+            ict_analysis = get_ict_analysis()
             
-            stats_text = f"""
-📊 **آمار و گزارش کامل سیستم**
+            price_text = f"""
+💰 **Live Gold Price Analysis**
 
-💰 **قیمت فعلی طلا:** ${current_price:.2f}
+🏆 **Current Price:** ${current_price:.2f}
+📊 **Source:** BrsAPI Pro
+⏰ **Last Update:** Now
 
-📡 **وضعیت API BrsAPI:**
-🔹 درخواست‌های امروز: {api_status['daily_calls']}/{api_status['daily_limit']}
-🔹 درخواست‌های این دقیقه: {api_status['minute_calls']}/{api_status['minute_limit']}
-🔹 مصرف روزانه: {api_status['daily_usage_percent']:.1f}%
-🔹 مصرف دقیقه‌ای: {api_status['minute_usage_percent']:.1f}%
+🎯 **ICT Analysis:**
+🔹 Signal: {ict_analysis.get('signal', 'HOLD')}
+🔹 Confidence: {ict_analysis.get('confidence', 0):.1%}
+🔹 Patterns Detected: {len(ict_analysis.get('reasons', []))}
 
-🚨 **آمار سیگنال‌ها:**
-🔹 کل سیگنال‌ها: {signal_stats['total_signals']}
-🔹 سیگنال‌های خرید: {signal_stats['buy_signals']}
-🔹 سیگنال‌های فروش: {signal_stats['sell_signals']}
-🔹 میانگین اعتماد: {signal_stats['avg_confidence']:.1%}
+📡 **API Status:**
+🔹 Calls Today: {api_status['daily_calls']}/{api_status['daily_limit']}
+🔹 Usage: {api_status['daily_usage_percent']:.1f}%
+🔹 Remaining: {api_status['daily_remaining']}
 
-⚠️ **مدیریت ریسک:**
-🔹 PnL روزانه: ${risk_stats['daily_pnl']:.2f}
-🔹 معاملات امروز: {risk_stats['daily_trades']}/{risk_stats['max_daily_trades']}
-🔹 نرخ برد اخیر: {risk_stats['recent_win_rate']:.1f}%
-
-👥 **کاربران:**
-🔹 کاربران پریمیوم: {premium_stats['total_premium_users']}
-🔹 مشترکین رایگان: {len(signal_manager.subscribers['free'])}
-
-🤖 **وضعیت سیستم:**
-🔹 نظارت سیگنال: {'فعال' if signal_manager.running else 'غیرفعال'}
-🔹 آخرین آپدیت: اکنون
+🔄 **Auto-refresh:** Every 10 seconds
 """
             
-            update.message.reply_text(stats_text, parse_mode='Markdown')
+            update.message.reply_text(price_text, parse_mode='Markdown')
             
         except Exception as e:
-            logger.error(f"Error getting comprehensive stats: {e}")
-            update.message.reply_text(f"❌ خطا در دریافت آمار: {str(e)}")
-    
-    elif text == "🔍 تحلیل فوری":
-        update.message.reply_text("🔄 **در حال انجام تحلیل فوری...**\n\nلطفاً صبر کنید...")
-        
-        try:
-            signal = get_ai_trading_signal(force_analysis=True)
-            
-            if signal:
-                action_emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}
-                confidence_stars = '⭐' * int(signal['confidence'] * 5)
-                
-                analysis_text = f"""
-🔍 **تحلیل فوری FlowAI**
-
-{action_emoji.get(signal['action'], '🟡')} **سیگنال:** {signal['action']}
-⭐ **اعتماد:** {signal['confidence']:.1%} {confidence_stars}
-
-💰 **قیمت‌ها:**
-🔹 قیمت فعلی: ${signal['current_price']:.2f}
-🔹 قیمت ورود: ${signal['entry_price']:.2f}
-🎯 هدف: ${signal['target_price']:.2f}
-🛑 حد ضرر: ${signal['stop_loss']:.2f}
-
-📊 **تحلیل تکنیکال:**
-🔹 RSI: {signal['indicators']['rsi']:.1f}
-🔹 MACD: {signal['indicators']['macd']:.3f}
-🔹 SMA20: ${signal['indicators']['sma_20']:.2f}
-🔹 امتیاز صعودی: {signal['bullish_score']}
-🔹 امتیاز نزولی: {signal['bearish_score']}
-
-⏰ **زمان:** {signal['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}
-{'🔄 **تحلیل اجباری**' if signal.get('forced') else ''}
-"""
-                
-                update.message.reply_text(analysis_text, parse_mode='Markdown')
-            else:
-                update.message.reply_text(
-                    "⚠️ **تحلیل انجام شد**\n\n"
-                    "در حال حاضر شرایط مناسبی برای سیگنال وجود ندارد.\n"
-                    "بازار ممکن است در حالت خنثی باشد."
-                )
-        except Exception as e:
-            update.message.reply_text(f"❌ خطا در تحلیل فوری: {str(e)}")
+            update.message.reply_text(f"❌ خطا در دریافت قیمت: {str(e)}")
 
 def handle_admin_callbacks(update: Update, context: CallbackContext):
-    """مدیریت callback های ادمین"""
+    """مدیریت callback های ادمین ICT"""
     query = update.callback_query
     query.answer()
     
@@ -450,168 +355,145 @@ def handle_admin_callbacks(update: Update, context: CallbackContext):
         return
     
     data = query.data
-    logger.info(f"Admin callback: {data} by user {user_id}")
+    logger.info(f"ICT Admin callback: {data} by user {user_id}")
     
-    if data == "start_monitoring":
+    if data == "ict_signals":
+        try:
+            ict_analysis = get_ict_analysis()
+            data_df = get_processed_data("GOLD", "1h", 50)
+            
+            if not data_df.empty:
+                latest = data_df.iloc[-1]
+                
+                signal_text = f"""
+🎯 **ICT Signals Analysis**
+
+📊 **Current Signal:**
+🔹 Action: {ict_analysis.get('signal', 'HOLD')}
+🔹 Confidence: {ict_analysis.get('confidence', 0):.1%}
+🔹 Reasons: {', '.join(ict_analysis.get('reasons', []))}
+
+🎯 **ICT Patterns Active:**
+🔹 Order Blocks: {'✅' if ict_analysis.get('ict_patterns', {}).get('order_blocks') else '❌'}
+🔹 Fair Value Gaps: {'✅' if ict_analysis.get('ict_patterns', {}).get('fair_value_gaps') else '❌'}
+🔹 Liquidity Sweeps: {'✅' if ict_analysis.get('ict_patterns', {}).get('liquidity_sweeps') else '❌'}
+🔹 Market Structure: {ict_analysis.get('ict_patterns', {}).get('market_structure', 'NEUTRAL')}
+
+📈 **Latest Candle:**
+🔹 Open: ${latest.get('Open', 0):.2f}
+🔹 High: ${latest.get('High', 0):.2f}
+🔹 Low: ${latest.get('Low', 0):.2f}
+🔹 Close: ${latest.get('Close', 0):.2f}
+
+⏰ **Analysis Time:** {data_df.index[-1].strftime('%Y-%m-%d %H:%M')}
+"""
+                
+                query.edit_message_text(signal_text, parse_mode='Markdown')
+            else:
+                query.edit_message_text("❌ No data available for ICT signals analysis")
+                
+        except Exception as e:
+            query.edit_message_text(f"❌ خطا در تحلیل ICT: {str(e)}")
+    
+    elif data == "ict_ai_signal":
+        try:
+            # ترکیب ICT + AI
+            ict_analysis = get_ict_analysis()
+            ai_signal = get_ai_trading_signal(force_analysis=True)
+            
+            if ai_signal and ict_analysis:
+                combined_text = f"""
+🎯 **ICT + AI Combined Signal**
+
+🤖 **AI Analysis:**
+🔹 Signal: {ai_signal.get('action', 'HOLD')}
+🔹 Confidence: {ai_signal.get('confidence', 0):.1%}
+🔹 Entry: ${ai_signal.get('entry_price', 0):.2f}
+🔹 Target: ${ai_signal.get('target_price', 0):.2f}
+🔹 Stop Loss: ${ai_signal.get('stop_loss', 0):.2f}
+
+🎯 **ICT Analysis:**
+🔹 Signal: {ict_analysis.get('signal', 'HOLD')}
+🔹 Confidence: {ict_analysis.get('confidence', 0):.1%}
+🔹 Patterns: {len(ict_analysis.get('reasons', []))}
+
+🔄 **Combined Decision:**
+"""
+                
+                # ترکیب سیگنال‌ها
+                if ai_signal['action'] == ict_analysis['signal']:
+                    combined_confidence = (ai_signal['confidence'] + ict_analysis['confidence']) / 2
+                    combined_text += f"✅ **STRONG {ai_signal['action']}** - Confidence: {combined_confidence:.1%}\n"
+                    combined_text += "🎯 Both AI and ICT agree on direction!"
+                else:
+                    combined_text += f"⚠️ **CONFLICTED** - AI: {ai_signal['action']}, ICT: {ict_analysis['signal']}\n"
+                    combined_text += "🤔 Consider waiting for alignment"
+                
+                query.edit_message_text(combined_text, parse_mode='Markdown')
+            else:
+                query.edit_message_text("❌ Unable to generate combined signal")
+                
+        except Exception as e:
+            query.edit_message_text(f"❌ خطا در سیگنال ترکیبی: {str(e)}")
+    
+    elif data == "start_monitoring":
         start_signal_monitoring()
-        query.edit_message_text("✅ **نظارت خودکار سیگنال‌ها شروع شد**\n\nسیستم هر 5 دقیقه بازار را بررسی می‌کند.", parse_mode='Markdown')
+        query.edit_message_text("✅ **ICT Signal Monitoring Started**\n\nSystem will check market every 5 minutes with ICT analysis.", parse_mode='Markdown')
     
     elif data == "stop_monitoring":
         stop_signal_monitoring()
-        query.edit_message_text("⏹️ **نظارت خودکار سیگنال‌ها متوقف شد**", parse_mode='Markdown')
+        query.edit_message_text("⏹️ **ICT Signal Monitoring Stopped**", parse_mode='Markdown')
     
-    elif data == "force_analysis":
+    elif data == "htf_analysis":
         try:
-            signal = get_ai_trading_signal(force_analysis=True)
-            if signal:
-                asyncio.run(signal_manager.send_manual_signal(user_id, force=True))
-                query.edit_message_text("✅ **تحلیل فوری انجام شد و سیگنال ارسال شد**", parse_mode='Markdown')
-            else:
-                query.edit_message_text("⚠️ **تحلیل انجام شد اما سیگنالی تولید نشد**", parse_mode='Markdown')
-        except Exception as e:
-            query.edit_message_text(f"❌ خطا در تحلیل فوری: {str(e)}")
-    
-    elif data == "start_backtest":
-        query.edit_message_text("🔄 **شروع بک‌تست...**\n\nلطفاً صبر کنید، این فرآیند ممکن است چند دقیقه طول بکشد.")
-        
-        try:
-            # اجرای بک‌تست با پارامترهای پیش‌فرض
-            results = run_backtest_analysis(
-                symbol="GOLD",
-                start_date="2024-01-01",
-                end_date="2024-12-31",
-                initial_balance=10000,
-                timeframe="1h",
-                risk_per_trade=0.02
-            )
+            # تحلیل Higher Time Frame
+            htf_data = get_processed_data("GOLD", "4h", 100)
+            daily_data = get_processed_data("GOLD", "1d", 50)
             
-            if results:
-                summary = get_backtest_summary()
-                query.edit_message_text(summary, parse_mode='Markdown')
-            else:
-                query.edit_message_text("❌ **خطا در اجرای بک‌تست**")
+            if not htf_data.empty and not daily_data.empty:
+                htf_latest = htf_data.iloc[-1]
+                daily_latest = daily_data.iloc[-1]
                 
-        except Exception as e:
-            query.edit_message_text(f"❌ خطا در بک‌تست: {str(e)}")
-    
-    elif data == "add_premium_user":
-        query.edit_message_text(
-            "➕ **اضافه کردن کاربر پریمیوم**\n\n"
-            "لطفاً ID کاربر را ارسال کنید:\n"
-            "مثال: 123456789",
-            parse_mode='Markdown'
-        )
-        admin_menu.pending_actions[user_id] = "add_premium"
-    
-    elif data == "remove_premium_user":
-        query.edit_message_text(
-            "➖ **حذف کاربر پریمیوم**\n\n"
-            "لطفاً ID کاربر را ارسال کنید:\n"
-            "مثال: 123456789",
-            parse_mode='Markdown'
-        )
-        admin_menu.pending_actions[user_id] = "remove_premium"
-    
-    elif data == "list_premium_users":
-        try:
-            premium_list = premium_manager.format_premium_list()
-            query.edit_message_text(premium_list, parse_mode='Markdown')
-        except Exception as e:
-            query.edit_message_text(f"❌ خطا در دریافت لیست: {str(e)}")
-    
-    elif data == "daily_report":
-        try:
-            daily_report = export_daily_report_text()
-            query.edit_message_text(daily_report, parse_mode='Markdown')
-        except Exception as e:
-            query.edit_message_text(f"❌ خطا در تولید گزارش روزانه: {str(e)}")
-    
-    elif data == "weekly_report":
-        try:
-            weekly_report = export_weekly_report_text()
-            query.edit_message_text(weekly_report, parse_mode='Markdown')
-        except Exception as e:
-            query.edit_message_text(f"❌ خطا در تولید گزارش هفتگی: {str(e)}")
-    
-    elif data == "send_alert":
-        query.edit_message_text(
-            "🚨 **ارسال هشدار سیستم**\n\n"
-            "لطفاً متن هشدار را ارسال کنید:",
-            parse_mode='Markdown'
-        )
-        admin_menu.pending_actions[user_id] = "send_alert"
+                htf_text = f"""
+📈 **Higher Time Frame Analysis**
 
-def handle_pending_actions(update: Update, context: CallbackContext):
-    """مدیریت اقدامات در انتظار"""
-    user_id = update.effective_user.id
-    
-    if not admin_menu.is_admin(user_id):
-        return
-    
-    if user_id not in admin_menu.pending_actions:
-        return
-    
-    action = admin_menu.pending_actions[user_id]
-    text = update.message.text
-    
-    if action == "add_premium":
-        try:
-            target_user_id = int(text)
-            success = premium_manager.add_premium_user(target_user_id, user_id, 30)
-            
-            if success:
-                update.message.reply_text(f"✅ کاربر {target_user_id} به پریمیوم اضافه شد")
-            else:
-                update.message.reply_text(f"❌ خطا در اضافه کردن کاربر {target_user_id}")
+📊 **4H Timeframe:**
+🔹 Market Structure: {htf_latest.get('Market_Structure', 'NEUTRAL')}
+🔹 RSI: {htf_latest.get('RSI', 0):.1f}
+🔹 MACD: {htf_latest.get('MACD', 0):.3f}
+🔹 Order Blocks: {'✅' if htf_latest.get('Bullish_OB') or htf_latest.get('Bearish_OB') else '❌'}
+
+📊 **Daily Timeframe:**
+🔹 Market Structure: {daily_latest.get('Market_Structure', 'NEUTRAL')}
+🔹 RSI: {daily_latest.get('RSI', 0):.1f}
+🔹 Trend Direction: {'Bullish' if daily_latest.get('Close', 0) > daily_latest.get('SMA_20', 0) else 'Bearish'}
+
+🎯 **HTF Bias:**
+"""
                 
-        except ValueError:
-            update.message.reply_text("❌ ID کاربر نامعتبر است")
-        except Exception as e:
-            update.message.reply_text(f"❌ خطا: {str(e)}")
-        
-        del admin_menu.pending_actions[user_id]
-    
-    elif action == "remove_premium":
-        try:
-            target_user_id = int(text)
-            success = premium_manager.remove_premium_user(target_user_id, user_id)
-            
-            if success:
-                update.message.reply_text(f"✅ کاربر {target_user_id} از پریمیوم حذف شد")
-            else:
-                update.message.reply_text(f"❌ خطا در حذف کاربر {target_user_id}")
+                # تعیین bias کلی
+                if (htf_latest.get('Market_Structure') == 'BULLISH' and 
+                    daily_latest.get('Market_Structure') == 'BULLISH'):
+                    htf_text += "🟢 **STRONG BULLISH BIAS**"
+                elif (htf_latest.get('Market_Structure') == 'BEARISH' and 
+                      daily_latest.get('Market_Structure') == 'BEARISH'):
+                    htf_text += "🔴 **STRONG BEARISH BIAS**"
+                else:
+                    htf_text += "🟡 **MIXED/NEUTRAL BIAS**"
                 
-        except ValueError:
-            update.message.reply_text("❌ ID کاربر نامعتبر است")
-        except Exception as e:
-            update.message.reply_text(f"❌ خطا: {str(e)}")
-        
-        del admin_menu.pending_actions[user_id]
-    
-    elif action == "send_alert":
-        try:
-            result = send_system_alert("admin", text, admin_only=False)
-            
-            if result['sent'] > 0:
-                update.message.reply_text(f"✅ هشدار به {result['sent']} کاربر ارسال شد")
+                query.edit_message_text(htf_text, parse_mode='Markdown')
             else:
-                update.message.reply_text("❌ خطا در ارسال هشدار")
+                query.edit_message_text("❌ Insufficient data for HTF analysis")
                 
         except Exception as e:
-            update.message.reply_text(f"❌ خطا: {str(e)}")
-        
-        del admin_menu.pending_actions[user_id]
+            query.edit_message_text(f"❌ خطا در تحلیل HTF: {str(e)}")
 
 # Setup handlers
 def setup_admin_handlers(dispatcher):
-    """راه‌اندازی handler های ادمین"""
+    """راه‌اندازی handler های ادمین ICT"""
     dispatcher.add_handler(CommandHandler('admin', start_admin))
     dispatcher.add_handler(MessageHandler(
-        Filters.text & Filters.regex(r'^(🤖 مدیریت ربات|📊 آمار و گزارش|🚨 مدیریت سیگنال‌ها|👥 مدیریت کاربران|🧪 بک‌تست|📋 گزارش‌گیری|🔔 اطلاع‌رسانی|💰 قیمت فعلی|📡 وضعیت API|🔍 تحلیل فوری|⚠️ مدیریت ریسک|⚙️ تنظیمات سیستم)$'), 
+        Filters.text & Filters.regex(r'^(🎯 ICT Dashboard|🤖 AI & Signals|📊 Market Analysis|🧪 ICT Backtest|👥 User Management|⚠️ Risk Control|📋 Reports & Analytics|🔔 Notifications|💰 Live Price|⚙️ ICT Settings)$'), 
         handle_admin_menu
     ))
     dispatcher.add_handler(CallbackQueryHandler(handle_admin_callbacks))
-    dispatcher.add_handler(MessageHandler(
-        Filters.text & ~Filters.regex(r'^[🎯🤖📊🚨👥🧪📋🔔💰📡🔍⚠️⚙️]'),
-        handle_pending_actions
-    ))

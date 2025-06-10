@@ -3,87 +3,76 @@ from telegram.ext import CallbackContext, CommandHandler, MessageHandler, Filter
 import logging
 import asyncio
 from ..data_sources.brsapi_fetcher import get_brsapi_gold_price
-from ..config import TELEGRAM_PREMIUM_USERS
+from ..config import TELEGRAM_PREMIUM_USERS, ICT_ENABLED, AI_MODEL_ENABLED
+from ..data_handler import get_ict_analysis, get_processed_data
 from ..telegram.signal_manager import send_manual_analysis, signal_manager
 from ..ai_signal_engine import get_ai_trading_signal
+from ..telegram.premium_manager import premium_manager
 
 logger = logging.getLogger(__name__)
 
-class UserMenu:
+class ICTUserMenu:
     def __init__(self):
         self.premium_users = set(TELEGRAM_PREMIUM_USERS)
-        logger.info(f"User menu initialized with premium users: {self.premium_users}")
+        logger.info(f"ICT User menu initialized with premium users: {self.premium_users}")
     
     def is_premium(self, user_id: int) -> bool:
         """بررسی پریمیوم بودن کاربر"""
-        return user_id in self.premium_users
-    
-    def add_premium_user(self, user_id: int):
-        """اضافه کردن کاربر پریمیوم"""
-        self.premium_users.add(user_id)
-        signal_manager.add_subscriber(user_id, 'premium')
-        logger.info(f"User {user_id} added to premium")
-    
-    def remove_premium_user(self, user_id: int):
-        """حذف کاربر پریمیوم"""
-        self.premium_users.discard(user_id)
-        signal_manager.remove_subscriber(user_id, 'premium')
-        signal_manager.add_subscriber(user_id, 'free')
-        logger.info(f"User {user_id} removed from premium")
+        return premium_manager.is_premium(user_id)
     
     def main_menu_keyboard(self, is_premium: bool = False):
-        """منوی اصلی کاربر"""
+        """منوی اصلی کاربر ICT-Enhanced"""
         keyboard = [
             [
-                KeyboardButton("💰 قیمت فعلی طلا"),
-                KeyboardButton("🔍 تحلیل فوری")
+                KeyboardButton("💰 Live Gold Price"),
+                KeyboardButton("🎯 ICT Analysis")
             ],
             [
-                KeyboardButton("📊 تحلیل بازار"),
-                KeyboardButton("🔔 سیگنال‌های معاملاتی")
-            ],
-            [
-                KeyboardButton("📈 نمودار قیمت"),
-                KeyboardButton("📋 تاریخچه سیگنال‌ها")
+                KeyboardButton("🔍 Quick Analysis"),
+                KeyboardButton("🚨 Trading Signals")
             ]
         ]
         
         if is_premium:
             keyboard.extend([
                 [
-                    KeyboardButton("🧪 بک‌تست شخصی"),
-                    KeyboardButton("⚙️ تنظیمات پیشرفته")
+                    KeyboardButton("📈 HTF Analysis"),
+                    KeyboardButton("🎯 ICT Patterns")
                 ],
                 [
-                    KeyboardButton("📱 اطلاع‌رسانی VIP"),
-                    KeyboardButton("🎯 سیگنال‌های اختصاصی")
+                    KeyboardButton("🧪 Personal Backtest"),
+                    KeyboardButton("⚙️ Advanced Settings")
                 ],
                 [
-                    KeyboardButton("📊 گزارش عملکرد"),
-                    KeyboardButton("🔍 تحلیل پیشرفته")
+                    KeyboardButton("📱 VIP Alerts"),
+                    KeyboardButton("🎯 Exclusive Signals")
+                ],
+                [
+                    KeyboardButton("📊 Performance Report"),
+                    KeyboardButton("🔍 Deep Analysis")
                 ]
             ])
         else:
             keyboard.extend([
                 [
-                    KeyboardButton("💎 ارتقا به پریمیوم"),
-                    KeyboardButton("ℹ️ راهنما")
+                    KeyboardButton("💎 Upgrade to Premium"),
+                    KeyboardButton("ℹ️ ICT Guide")
                 ],
                 [
-                    KeyboardButton("🎁 امتیازات رایگان"),
-                    KeyboardButton("📋 محدودیت‌ها")
+                    KeyboardButton("🎁 Free Features"),
+                    KeyboardButton("📋 Limitations")
                 ]
             ])
         
         keyboard.append([
-            KeyboardButton("👤 پروفایل من"),
-            KeyboardButton("📞 پشتیبانی")
+            KeyboardButton("👤 My Profile"),
+            KeyboardButton("📞 Support")
         ])
         
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
 # Instance global
-user_menu = UserMenu()
+user_menu = ICTUserMenu()
 
 def start_user(update: Update, context: CallbackContext):
     """شروع ربات برای کاربر عادی"""
@@ -97,40 +86,55 @@ def start_user(update: Update, context: CallbackContext):
     else:
         signal_manager.add_subscriber(user_id, 'free')
     
-    logger.info(f"User {user_id} ({user.first_name}) started bot. Premium: {is_premium}")
+    logger.info(f"ICT User {user_id} ({user.first_name}) started bot. Premium: {is_premium}")
     
     try:
         # دریافت قیمت فعلی
         current_price = get_brsapi_gold_price()
         
+        # دریافت تحلیل ICT
+        ict_analysis = get_ict_analysis()
+        
         welcome_text = f"""
-🎯 **FlowAI Trading Bot**
+🎯 **FlowAI-ICT Trading Bot**
 
 سلام {user.first_name} عزیز! 👋
-به ربات هوش مصنوعی معاملات طلا خوش آمدید.
+به ربات هوش مصنوعی ICT خوش آمدید.
 
 {'💎 شما کاربر **پریمیوم** هستید!' if is_premium else '🆓 شما کاربر **رایگان** هستید.'}
 
-💰 **قیمت فعلی طلا:** ${current_price:.2f}
+💰 **Live Market Data:**
+🔹 Gold Price: ${current_price:.2f}
+🔹 ICT Signal: {ict_analysis.get('signal', 'HOLD')}
+🔹 Confidence: {ict_analysis.get('confidence', 0):.1%}
 
-🔹 دریافت قیمت لحظه‌ای طلا
-🔹 تحلیل‌های هوش مصنوعی
-🔹 سیگنال‌های معاملاتی
-{'🔹 بک‌تست شخصی' if is_premium else '🔹 امکان ارتقا به پریمیوم'}
-{'🔹 اطلاع‌رسانی VIP' if is_premium else '🔹 محدودیت‌های رایگان'}
+🎯 **ICT Features Available:**
+🔹 Order Block Detection: {'✅' if ICT_ENABLED else '❌'}
+🔹 Fair Value Gap Analysis: {'✅' if ICT_ENABLED else '❌'}
+🔹 Liquidity Sweep Detection: {'✅' if ICT_ENABLED else '❌'}
+🔹 Market Structure Analysis: {'✅' if ICT_ENABLED else '❌'}
+{'🔹 AI Model Integration: ✅' if AI_MODEL_ENABLED else ''}
+
+🚀 **What You Get:**
+{'🔹 Real-time ICT analysis' if is_premium else '🔹 Basic ICT signals'}
+{'🔹 HTF multi-timeframe analysis' if is_premium else '🔹 Limited timeframes'}
+{'🔹 Personal backtesting' if is_premium else '🔹 Upgrade for backtesting'}
+{'🔹 VIP instant alerts' if is_premium else '🔹 Standard notifications'}
 
 از منوی زیر گزینه مورد نظر را انتخاب کنید:
 """
         
     except Exception as e:
-        logger.error(f"Error getting price in start_user: {e}")
+        logger.error(f"Error getting data in start_user: {e}")
         welcome_text = f"""
-🎯 **FlowAI Trading Bot**
+🎯 **FlowAI-ICT Trading Bot**
 
 سلام {user.first_name} عزیز! 👋
-به ربات هوش مصنوعی معاملات طلا خوش آمدید.
+به ربات هوش مصنوعی ICT خوش آمدید.
 
 {'💎 شما کاربر **پریمیوم** هستید!' if is_premium else '🆓 شما کاربر **رایگان** هستید.'}
+
+🎯 **ICT Trading Features Ready!**
 
 از منوی زیر گزینه مورد نظر را انتخاب کنید:
 """
@@ -142,11 +146,11 @@ def start_user(update: Update, context: CallbackContext):
     )
 
 async def handle_manual_analysis(update: Update, context: CallbackContext):
-    """مدیریت تحلیل فوری"""
+    """مدیریت تحلیل فوری ICT"""
     user_id = update.effective_user.id
     
     # ارسال پیام انتظار
-    waiting_message = update.message.reply_text("🔄 **در حال انجام تحلیل...**\n\nلطفاً صبر کنید...")
+    waiting_message = update.message.reply_text("🔄 **Performing ICT Analysis...**\n\nPlease wait...")
     
     try:
         # ارسال تحلیل فوری
@@ -167,147 +171,235 @@ async def handle_manual_analysis(update: Update, context: CallbackContext):
                 await context.bot.edit_message_text(
                     chat_id=update.effective_chat.id,
                     message_id=waiting_message.message_id,
-                    text="⚠️ **تحلیل انجام شد**\n\n"
-                         "در حال حاضر شرایط مناسبی برای سیگنال وجود ندارد.\n"
-                         "لطفاً دوباره تلاش کنید.",
+                    text="⚠️ **Analysis Complete**\n\n"
+                         "No clear ICT patterns detected at the moment.\n"
+                         "Market may be in consolidation phase.",
                     parse_mode='Markdown'
                 )
             except:
                 pass
                 
     except Exception as e:
-        logger.error(f"Error in manual analysis for user {user_id}: {e}")
+        logger.error(f"Error in ICT manual analysis for user {user_id}: {e}")
         try:
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
                 message_id=waiting_message.message_id,
-                text="❌ **خطا در تحلیل**\n\nلطفاً دوباره تلاش کنید.",
+                text="❌ **Analysis Error**\n\nPlease try again later.",
                 parse_mode='Markdown'
             )
         except:
             pass
 
 def handle_user_menu(update: Update, context: CallbackContext):
-    """مدیریت پیام‌های منوی کاربر"""
+    """مدیریت پیام‌های منوی کاربر ICT"""
     text = update.message.text
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     is_premium = user_menu.is_premium(user_id)
     
-    logger.info(f"User menu action: {text} by user {user_id} (Premium: {is_premium})")
+    logger.info(f"ICT User menu action: {text} by user {user_id} (Premium: {is_premium})")
     
-    if text == "🔍 تحلیل فوری":
+    if text == "🔍 Quick Analysis":
         # استفاده از asyncio برای اجرای تابع async
         asyncio.run(handle_manual_analysis(update, context))
         return
     
-    elif text == "💰 قیمت فعلی طلا":
+    elif text == "💰 Live Gold Price":
         try:
             price = get_brsapi_gold_price()
+            ict_analysis = get_ict_analysis()
+            
             price_text = f"""
-💰 **قیمت فعلی طلا**
+💰 **Live Gold Price - ICT Enhanced**
 
-🏆 **قیمت:** ${price:.2f}
-📊 **منبع:** BrsAPI Pro
-⏰ **آخرین به‌روزرسانی:** اکنون
+🏆 **Current Price:** ${price:.2f}
+📊 **Source:** BrsAPI Pro
+⏰ **Last Update:** Now
 
-📈 **تحلیل سریع:**
-{'🔹 تحلیل پیشرفته در دسترس است' if is_premium else '🔹 برای تحلیل پیشرفته، پریمیوم شوید'}
-{'🔹 اطلاع‌رسانی خودکار فعال' if is_premium else '🔹 اطلاع‌رسانی محدود'}
+🎯 **ICT Quick Analysis:**
+🔹 Signal: {ict_analysis.get('signal', 'HOLD')}
+🔹 Confidence: {ict_analysis.get('confidence', 0):.1%}
+🔹 Market Structure: {ict_analysis.get('ict_patterns', {}).get('market_structure', 'NEUTRAL')}
 
-💡 **نکته:** قیمت هر 10 ثانیه به‌روزرسانی می‌شود.
+📈 **Pattern Detection:**
+🔹 Order Blocks: {'✅' if ict_analysis.get('ict_patterns', {}).get('order_blocks') else '❌'}
+🔹 Fair Value Gaps: {'✅' if ict_analysis.get('ict_patterns', {}).get('fair_value_gaps') else '❌'}
+🔹 Liquidity Sweeps: {'✅' if ict_analysis.get('ict_patterns', {}).get('liquidity_sweeps') else '❌'}
+
+{'🎯 **Premium Features Available**' if is_premium else '💎 **Upgrade for Advanced Analysis**'}
+
+💡 **Note:** Price updates every 10 seconds with ICT analysis.
 """
             update.message.reply_text(price_text, parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Error getting price: {e}")
-            update.message.reply_text(f"❌ خطا در دریافت قیمت: لطفاً دوباره تلاش کنید.")
+            update.message.reply_text(f"❌ Error getting price data. Please try again.")
     
-    elif text == "📊 تحلیل بازار":
+    elif text == "🎯 ICT Analysis":
         if is_premium:
-            # تحلیل واقعی برای کاربران پریمیوم
+            # تحلیل کامل ICT برای کاربران پریمیوم
             try:
-                price = get_brsapi_gold_price()
-                signal = get_ai_trading_signal(force_analysis=True)
+                ict_analysis = get_ict_analysis()
+                data = get_processed_data("GOLD", "1h", 100)
                 
-                if signal:
+                if ict_analysis and not data.empty:
+                    latest = data.iloc[-1]
+                    
                     analysis_text = f"""
-📊 **تحلیل بازار طلا - ویژه پریمیوم**
+🎯 **Complete ICT Analysis - Premium**
 
-💰 **قیمت فعلی:** ${price:.2f}
+📊 **Current Signal:**
+🔹 Action: {ict_analysis.get('signal', 'HOLD')}
+🔹 Confidence: {ict_analysis.get('confidence', 0):.1%}
+🔹 Reasons: {', '.join(ict_analysis.get('reasons', []))}
 
-🔍 **تحلیل تکنیکال:**
-🔹 RSI: {signal['indicators']['rsi']:.1f}
-🔹 MACD: {signal['indicators']['macd']:.3f}
-🔹 SMA 20: ${signal['indicators']['sma_20']:.2f}
-🔹 SMA 50: ${signal['indicators']['sma_50']:.2f}
-🔹 Bollinger Upper: ${signal['indicators']['bb_upper']:.2f}
-🔹 Bollinger Lower: ${signal['indicators']['bb_lower']:.2f}
+📈 **Market Structure:**
+🔹 Current Structure: {latest.get('Market_Structure', 'NEUTRAL')}
+🔹 Structure Strength: {latest.get('Structure_Strength', 0):.1%}
+🔹 Swing High: {'✅' if latest.get('Swing_High') else '❌'}
+🔹 Swing Low: {'✅' if latest.get('Swing_Low') else '❌'}
 
-📈 **سیگنال AI:**
-🔹 عمل پیشنهادی: {signal['action']}
-🔹 اعتماد: {signal['confidence']:.1%}
-🔹 امتیاز صعودی: {signal['bullish_score']}
-🔹 امتیاز نزولی: {signal['bearish_score']}
+🎯 **Order Block Analysis:**
+🔹 Bullish OB: {'✅' if latest.get('Bullish_OB') else '❌'}
+🔹 Bearish OB: {'✅' if latest.get('Bearish_OB') else '❌'}
+🔹 OB Strength: {latest.get('OB_Strength', 0):.2f}
 
-🎯 **اهداف قیمتی:**
-🔹 هدف: ${signal['target_price']:.2f}
-🔹 حد ضرر: ${signal['stop_loss']:.2f}
+🔄 **Fair Value Gap Analysis:**
+🔹 Bullish FVG: {'✅' if latest.get('Bullish_FVG') else '❌'}
+🔹 Bearish FVG: {'✅' if latest.get('Bearish_FVG') else '❌'}
+🔹 FVG Size: {latest.get('FVG_Size', 0):.4f}
 
-⚠️ **هشدار:** این تحلیل صرفاً جنبه آموزشی دارد.
+💧 **Liquidity Analysis:**
+🔹 Buy Side Sweep: {'✅' if latest.get('Buy_Side_Liquidity_Sweep') else '❌'}
+🔹 Sell Side Sweep: {'✅' if latest.get('Sell_Side_Liquidity_Sweep') else '❌'}
+🔹 Liquidity Strength: {latest.get('Liquidity_Strength', 0):.4f}
+
+📊 **Technical Confluence:**
+🔹 RSI: {latest.get('RSI', 0):.1f}
+🔹 MACD: {latest.get('MACD', 0):.3f}
+🔹 ATR: {latest.get('ATR', 0):.4f}
+
+⚠️ **Risk Notice:** This analysis is for educational purposes only.
 """
                 else:
                     analysis_text = """
-📊 **تحلیل بازار طلا - ویژه پریمیوم**
+🎯 **ICT Analysis - Premium**
 
-🔍 تحلیل انجام شد اما در حال حاضر سیگنال مشخصی وجود ندارد.
-لطفاً دوباره تلاش کنید.
+🔄 Analysis in progress...
+Please try again in a moment.
 """
                 
                 update.message.reply_text(analysis_text, parse_mode='Markdown')
             except Exception as e:
-                logger.error(f"Error in premium analysis: {e}")
-                update.message.reply_text("🔄 در حال تحلیل بازار... لطفاً صبر کنید.")
+                logger.error(f"Error in premium ICT analysis: {e}")
+                update.message.reply_text("🔄 Analyzing market... Please wait a moment.")
         else:
             update.message.reply_text(
-                "💎 **تحلیل بازار - ویژه پریمیوم**\n\n"
-                "این ویژگی فقط برای کاربران پریمیوم در دسترس است.\n\n"
-                "🎯 **مزایای پریمیوم:**\n"
-                "🔹 تحلیل‌های پیشرفته هوش مصنوعی\n"
-                "🔹 سیگنال‌های اختصاصی\n"
-                "🔹 بک‌تست شخصی\n"
-                "🔹 اطلاع‌رسانی VIP\n\n"
-                "برای ارتقا به پریمیوم، گزینه 'ارتقا به پریمیوم' را انتخاب کنید.",
+                "🎯 **ICT Analysis - Premium Feature**\n\n"
+                "This advanced ICT analysis is available for Premium users only.\n\n"
+                "🎯 **Premium ICT Features:**\n"
+                "🔹 Complete Order Block analysis\n"
+                "🔹 Fair Value Gap detection\n"
+                "🔹 Liquidity sweep identification\n"
+                "🔹 Market structure analysis\n"
+                "🔹 Multi-timeframe confluence\n"
+                "🔹 Real-time pattern alerts\n\n"
+                "💎 Upgrade to Premium for full ICT analysis!",
                 parse_mode='Markdown'
             )
     
-    elif text == "💎 ارتقا به پریمیوم":
+    elif text == "📈 HTF Analysis":
+        if is_premium:
+            try:
+                # تحلیل Higher Time Frame
+                htf_4h = get_processed_data("GOLD", "4h", 50)
+                htf_1d = get_processed_data("GOLD", "1d", 30)
+                
+                if not htf_4h.empty and not htf_1d.empty:
+                    latest_4h = htf_4h.iloc[-1]
+                    latest_1d = htf_1d.iloc[-1]
+                    
+                    htf_text = f"""
+📈 **Higher Time Frame Analysis - Premium**
+
+📊 **4H Analysis:**
+🔹 Market Structure: {latest_4h.get('Market_Structure', 'NEUTRAL')}
+🔹 Order Blocks: {'✅' if latest_4h.get('Bullish_OB') or latest_4h.get('Bearish_OB') else '❌'}
+🔹 Fair Value Gaps: {'✅' if latest_4h.get('Bullish_FVG') or latest_4h.get('Bearish_FVG') else '❌'}
+🔹 RSI: {latest_4h.get('RSI', 0):.1f}
+
+📊 **Daily Analysis:**
+🔹 Market Structure: {latest_1d.get('Market_Structure', 'NEUTRAL')}
+🔹 Trend Direction: {'Bullish' if latest_1d.get('Close', 0) > latest_1d.get('SMA_20', 0) else 'Bearish'}
+🔹 RSI: {latest_1d.get('RSI', 0):.1f}
+
+🎯 **HTF Bias:**
+"""
+                    
+                    # تعیین bias کلی
+                    if (latest_4h.get('Market_Structure') == 'BULLISH' and 
+                        latest_1d.get('Market_Structure') == 'BULLISH'):
+                        htf_text += "🟢 **STRONG BULLISH BIAS**\n"
+                        htf_text += "Look for bullish ICT setups on lower timeframes."
+                    elif (latest_4h.get('Market_Structure') == 'BEARISH' and 
+                          latest_1d.get('Market_Structure') == 'BEARISH'):
+                        htf_text += "🔴 **STRONG BEARISH BIAS**\n"
+                        htf_text += "Look for bearish ICT setups on lower timeframes."
+                    else:
+                        htf_text += "🟡 **MIXED/NEUTRAL BIAS**\n"
+                        htf_text += "Wait for clearer directional bias."
+                    
+                    update.message.reply_text(htf_text, parse_mode='Markdown')
+                else:
+                    update.message.reply_text("❌ Insufficient data for HTF analysis")
+                    
+            except Exception as e:
+                update.message.reply_text("🔄 Loading HTF analysis... Please wait.")
+        else:
+            update.message.reply_text(
+                "📈 **HTF Analysis - Premium Feature**\n\n"
+                "Higher Time Frame analysis with ICT methodology is available for Premium users.\n\n"
+                "💎 Upgrade to access multi-timeframe ICT analysis!",
+                parse_mode='Markdown'
+            )
+    
+    elif text == "💎 Upgrade to Premium":
         premium_text = f"""
-💎 **ارتقا به پریمیوم**
+💎 **Upgrade to FlowAI-ICT Premium**
 
-🎯 **مزایای ویژه پریمیوم:**
-🔹 تحلیل‌های پیشرفته هوش مصنوعی
-🔹 سیگنال‌های اختصاصی و دقیق
-🔹 بک‌تست شخصی با پارامترهای دلخواه
-🔹 اطلاع‌رسانی VIP و فوری
-🔹 پشتیبانی اولویت‌دار 24/7
-🔹 گزارش‌های تفصیلی عملکرد
-🔹 دسترسی به ابزارهای پیشرفته
-🔹 تحلیل فوری نامحدود
+🎯 **Exclusive ICT Features:**
+🔹 Complete Order Block analysis with strength ratings
+🔹 Fair Value Gap detection and validation
+🔹 Liquidity sweep identification and tracking
+🔹 Market structure analysis across all timeframes
+🔹 HTF (Higher Time Frame) bias analysis
+🔹 Real-time ICT pattern alerts
+🔹 Personal backtesting with ICT strategies
+🔹 Advanced confluences and setups
+🔹 VIP instant notifications
+🔹 24/7 priority support
 
-💰 **قیمت:** 50,000 تومان/ماه
-🎁 **تخفیف ویژه:** 30% برای 3 ماه اول
+🤖 **AI Integration:**
+🔹 ICT + AI combined signals
+🔹 Machine learning pattern recognition
+🔹 Automated trade setups
+🔹 Risk management integration
 
-📞 **برای خرید:**
-🔹 با پشتیبانی تماس بگیرید
-🔹 یا از گزینه 'پشتیبانی' استفاده کنید
+💰 **Pricing:** 50,000 Toman/month
+🎁 **Special Offer:** 30% off first 3 months
 
-👤 **ID شما:** `{user_id}`
+📞 **To Purchase:**
+🔹 Contact support
+🔹 Use 'Support' button below
+
+👤 **Your ID:** `{user_id}`
 """
         update.message.reply_text(premium_text, parse_mode='Markdown')
     
-    elif text == "🔔 سیگنال‌های معاملاتی":
+    elif text == "🚨 Trading Signals":
         if is_premium:
-            # دریافت آخرین سیگنال‌ها برای کاربران پریمیوم
+            # سیگنال‌های کامل برای کاربران پریمیوم
             try:
                 stats = signal_manager.get_signal_statistics()
                 last_signal = None
@@ -318,106 +410,130 @@ def handle_user_menu(update: Update, context: CallbackContext):
                 if last_signal:
                     action_emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}
                     signals_text = f"""
-🔔 **سیگنال‌های معاملاتی VIP**
+🚨 **ICT Trading Signals - VIP**
 
-📊 **آخرین سیگنال:**
+📊 **Latest Signal:**
 {action_emoji.get(last_signal['action'], '🟡')} **{last_signal['action']}**
-💰 قیمت ورود: ${last_signal['entry_price']:.2f}
-🎯 هدف: ${last_signal['target_price']:.2f}
-🛑 حد ضرر: ${last_signal['stop_loss']:.2f}
-⭐ اعتماد: {last_signal['confidence']:.1%}
-⏰ زمان: {last_signal['timestamp'].strftime('%H:%M')}
+💰 Entry: ${last_signal['entry_price']:.2f}
+🎯 Target: ${last_signal['target_price']:.2f}
+🛑 Stop Loss: ${last_signal['stop_loss']:.2f}
+⭐ Confidence: {last_signal['confidence']:.1%}
+⏰ Time: {last_signal['timestamp'].strftime('%H:%M')}
 
-📈 **عملکرد امروز:**
-🔹 تعداد سیگنال‌ها: {stats['total_signals']}
-🔹 سیگنال‌های خرید: {stats['buy_signals']}
-🔹 سیگنال‌های فروش: {stats['sell_signals']}
-🔹 میانگین اعتماد: {stats['avg_confidence']:.1%}
+🎯 **ICT Context:**
+🔹 Based on: {', '.join(last_signal.get('analysis_details', [])[:3])}
+🔹 Market Structure: {last_signal.get('indicators', {}).get('market_structure', 'N/A')}
 
-🔔 **اطلاع‌رسانی:** فعال
+📈 **Today's Performance:**
+🔹 Total Signals: {stats['total_signals']}
+🔹 Buy Signals: {stats['buy_signals']}
+🔹 Sell Signals: {stats['sell_signals']}
+🔹 Average Confidence: {stats['avg_confidence']:.1%}
+
+🔔 **VIP Alerts:** Active
 """
                 else:
                     signals_text = """
-🔔 **سیگنال‌های معاملاتی VIP**
+🚨 **ICT Trading Signals - VIP**
 
-📊 **وضعیت:**
-هنوز سیگنالی تولید نشده است.
-سیستم به‌طور خودکار بازار را نظارت می‌کند.
+📊 **Status:**
+No signals generated yet today.
+System is monitoring ICT patterns continuously.
 
-🔔 **اطلاع‌رسانی:** فعال
-💡 **نکته:** از گزینه 'تحلیل فوری' برای دریافت سیگنال استفاده کنید.
+🔔 **VIP Alerts:** Active
+💡 **Note:** You'll receive instant notifications when ICT setups appear.
 """
         else:
             signals_text = """
-🔔 **سیگنال‌های معاملاتی**
+🚨 **Trading Signals**
 
-📊 **نمونه سیگنال رایگان:**
-🟡 **مشاهده طلا**
-💰 قیمت فعلی: دریافت شود
-📈 روند کلی: خنثی
+📊 **Free Sample Signal:**
+🟡 **WATCH Gold**
+💰 Current Price: Check live price
+📈 General Bias: Monitor ICT patterns
 
-💎 **برای دریافت سیگنال‌های دقیق:**
-🔹 ارتقا به پریمیوم
-🔹 دسترسی به 5-10 سیگنال روزانه
-🔹 دقت بالای 70%
-🔹 اطلاع‌رسانی فوری
-🔹 تحلیل‌های کامل
+💎 **For Premium ICT Signals:**
+🔹 Precise entry/exit points
+🔹 ICT-based setups
+🔹 5-10 signals daily
+🔹 70%+ accuracy rate
+🔹 Instant VIP alerts
+🔹 Complete trade management
+
+👆 Upgrade to Premium for full ICT signals!
 """
         
         update.message.reply_text(signals_text, parse_mode='Markdown')
     
-    elif text == "👤 پروفایل من":
+    elif text == "👤 My Profile":
         profile_text = f"""
-👤 **پروفایل کاربری**
+👤 **Your FlowAI-ICT Profile**
 
 🆔 **ID:** `{user_id}`
-👤 **نام:** {user_name}
-{'💎 **وضعیت:** پریمیوم' if is_premium else '🆓 **وضعیت:** رایگان'}
-📅 **عضویت:** امروز
-🔔 **اطلاع‌رسانی:** {'فعال' if is_premium else 'محدود'}
+👤 **Name:** {user_name}
+{'💎 **Status:** Premium' if is_premium else '🆓 **Status:** Free'}
+📅 **Member Since:** Today
+🔔 **Notifications:** {'VIP Active' if is_premium else 'Standard'}
 
-📊 **آمار شما:**
-🔹 تعداد بازدید: 1
-🔹 سیگنال‌های دریافتی: {len(signal_manager.signal_history)}
-{'🔹 تحلیل‌های انجام شده: نامحدود' if is_premium else '🔹 محدودیت‌های رایگان فعال'}
+📊 **Your ICT Stats:**
+🔹 Sessions: 1
+🔹 Signals Received: {len(signal_manager.signal_history)}
+{'🔹 Backtests Run: 0' if is_premium else '🔹 Free Limitations Active'}
+{'🔹 HTF Analysis Access: ✅' if is_premium else '🔹 HTF Analysis: Upgrade Required'}
 
-⚙️ **تنظیمات:**
-🔹 زبان: فارسی
-🔹 منطقه زمانی: تهران
-🔹 اطلاع‌رسانی: {'VIP' if is_premium else 'محدود'}
+🎯 **ICT Features:**
+🔹 Order Block Detection: {'Full Access' if is_premium else 'Basic'}
+🔹 Fair Value Gaps: {'Full Access' if is_premium else 'Limited'}
+🔹 Liquidity Analysis: {'Full Access' if is_premium else 'Basic'}
+🔹 Market Structure: {'Multi-TF' if is_premium else 'Single TF'}
+
+⚙️ **Settings:**
+🔹 Language: Persian
+🔹 Timezone: Tehran
+🔹 Notifications: {'VIP' if is_premium else 'Standard'}
+🔹 ICT Methodology: Enabled
 """
         update.message.reply_text(profile_text, parse_mode='Markdown')
     
-    elif text == "📞 پشتیبانی":
+    elif text == "📞 Support":
         support_text = f"""
-📞 **پشتیبانی FlowAI**
+📞 **FlowAI-ICT Support**
 
-🎯 **راه‌های ارتباط:**
-📧 ایمیل: support@flowai.ir
-📱 تلگرام: @FlowAI_Support
-📞 تلفن: 021-12345678
+🎯 **Contact Methods:**
+📧 Email: support@flowai-ict.ir
+📱 Telegram: @FlowAI_ICT_Support
+📞 Phone: 021-12345678
 
-⏰ **ساعات کاری:**
-🔹 شنبه تا چهارشنبه: 9-18
-🔹 پنج‌شنبه: 9-14
-{'🔹 پشتیبانی 24/7 برای کاربران پریمیوم' if is_premium else '🔹 پاسخ‌گویی در ساعات اداری'}
+⏰ **Support Hours:**
+🔹 Saturday-Wednesday: 9AM-6PM
+🔹 Thursday: 9AM-2PM
+{'🔹 24/7 VIP Support for Premium users' if is_premium else '🔹 Business hours for Free users'}
 
-📝 **درخواست پشتیبانی:**
-لطفاً ID خود را ارسال کنید: `{user_id}`
+📝 **For Support Request:**
+Please include your ID: `{user_id}`
 
-💡 **سوالات متداول:**
-🔹 نحوه ارتقا به پریمیوم
-🔹 تفسیر سیگنال‌ها
-🔹 مشکلات فنی
-🔹 نحوه استفاده از تحلیل فوری
+💡 **Common Questions:**
+🔹 How to upgrade to Premium
+🔹 Understanding ICT signals
+🔹 Technical issues
+🔹 ICT methodology questions
+🔹 Account management
+
+🎯 **ICT Learning Resources:**
+🔹 Order Block guide
+🔹 Fair Value Gap tutorial
+🔹 Market structure basics
+🔹 Liquidity concepts
+
+{'🎓 **Premium Learning Center Available**' if is_premium else '💎 **Upgrade for Advanced ICT Education**'}
 """
         update.message.reply_text(support_text, parse_mode='Markdown')
 
 # Setup handlers
 def setup_user_handlers(dispatcher):
-    """راه‌اندازی handler های کاربر"""
+    """راه‌اندازی handler های کاربر ICT"""
     dispatcher.add_handler(CommandHandler('start', start_user))
     dispatcher.add_handler(MessageHandler(
-        Filters.text & Filters.regex(r'^(💰 قیمت فعلی طلا|📊 تحلیل بازار|💎 ارتقا به پریمیوم|🔔 سیگنال‌های معاملاتی|👤 پروفایل من|📞 پشتیبانی|🔍 تحلیل فوری)$'), 
+        Filters.text & Filters.regex(r'^(💰 Live Gold Price|🎯 ICT Analysis|🔍 Quick Analysis|🚨 Trading Signals|📈 HTF Analysis|🎯 ICT Patterns|🧪 Personal Backtest|⚙️ Advanced Settings|📱 VIP Alerts|🎯 Exclusive Signals|📊 Performance Report|🔍 Deep Analysis|💎 Upgrade to Premium|ℹ️ ICT Guide|🎁 Free Features|📋 Limitations|👤 My Profile|📞 Support)$'), 
         handle_user_menu
     ))
