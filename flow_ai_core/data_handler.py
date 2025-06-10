@@ -247,9 +247,7 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_processed_data(symbol: str, timeframe: str = "1h", limit: int = 1000) -> pd.DataFrame:
-    """
-    Get processed data with enhanced validation and real-time checks
-    """
+    """Get processed data with enhanced validation and real-time checks"""
     try:
         from . import config
         
