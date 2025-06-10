@@ -186,3 +186,13 @@ ENABLE_PRICE_VALIDATION = get_env_var('ENABLE_PRICE_VALIDATION', True, var_type=
 # Log configuration summary
 logger.debug(f"Trading Symbol: {SYMBOL}, LTF: {TIMEFRAME}, HTFs: {HTF_TIMEFRAMES}")
 logger.info("Configuration loaded successfully.")
+
+
+# ===== BRSAPI CONFIGURATION =====
+BRSAPI_KEY = get_env_var('BRSAPI_KEY', 'FreeQZdOYW6D3nNv95jZ9BcYXJHzTJpf')
+BRSAPI_DAILY_LIMIT = get_env_var('BRSAPI_DAILY_LIMIT', 8000, var_type=int)
+BRSAPI_MINUTE_LIMIT = get_env_var('BRSAPI_MINUTE_LIMIT', 45, var_type=int)
+PRICE_ENGINE_PRIMARY = get_env_var('PRICE_ENGINE_PRIMARY', 'BrsAPI')
+PRICE_ENGINE_FALLBACK = get_env_var('PRICE_ENGINE_FALLBACK', 'GoldAPI')
+PRICE_VALIDATION_ENABLED = get_env_var('PRICE_VALIDATION_ENABLED', True, var_type=bool)
+PRICE_HISTORY_LIMIT = get_env_var('PRICE_HISTORY_LIMIT', 100, var_type=int)
