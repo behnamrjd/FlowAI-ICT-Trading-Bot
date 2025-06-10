@@ -1,7 +1,6 @@
 import requests
 import logging
-from datetime import datetime, timedelta
-import jdatetime
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -61,15 +60,18 @@ class BrsAPIFetcher:
             return None
         try:
             params['key'] = self.api_key
+            logger.debug(f"Making request: {params}")
             response = requests.get(self.base_url, params=params, headers=self.headers, timeout=10)
             self.daily_calls += 1
             self.minute_calls += 1
             if response.status_code == 200:
                 data = response.json()
                 self.cache[cache_key] = {'data': data, 'timestamp': datetime.now()}
+                logger.debug(f"API Response: {data}")
                 return data
             else:
                 logger.error(f"BrsAPI HTTP error: {response.status_code}")
+                logger.error(f"Response: {response.text}")
                 return None
         except Exception as e:
             logger.error(f"BrsAPI request failed: {e}")
@@ -78,19 +80,21 @@ class BrsAPIFetcher:
     def get_real_time_gold(self):
         params = {'section': 'gold'}
         data = self._make_request(params)
-        if not data:
+        if not data or not isinstance(data, list):
+            logger.error("Invalid or empty data received from BrsAPI")
             return None
         for item in data:
             name = item.get('name', '').lower()
             if 'طلا' in name or 'gold' in name:
                 try:
-                    price_rial = float(item.get('price', 0))
-                    price_usd = price_rial / 70000
+                    price_str = item.get('price', '0').replace(',', '')
+                    price_rial = float(price_str)
+                    price_usd = price_rial / 70000  # تبدیل تقریبی به دلار
                     return {
                         'price': price_usd,
                         'price_rial': price_rial,
-                        'change': float(item.get('change_value', 0)),
-                        'change_percent': float(item.get('change_percent', 0)),
+                        'change': float(item.get('change_value', '0').replace(',', '')),
+                        'change_percent': float(item.get('change_percent', '0')),
                         'timestamp': datetime.now(),
                         'source': 'BrsAPI_Pro',
                         'symbol': item.get('name', 'Gold'),
@@ -99,6 +103,7 @@ class BrsAPIFetcher:
                     }
                 except Exception as e:
                     logger.error(f"Error processing gold data: {e}")
+                    continue
         logger.warning("No gold data found in response")
         return None
 
@@ -107,7 +112,7 @@ brs_fetcher = BrsAPIFetcher()
 
 def get_brsapi_gold_price():
     data = brs_fetcher.get_real_time_gold()
-    return data['price'] if data else None
+    return data['price'] if data and isinstance(data, dict) else None
 
 def get_brsapi_status():
     status = {
