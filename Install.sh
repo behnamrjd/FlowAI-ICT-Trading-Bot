@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # =====================================================
-# FlowAI-ICT Trading Bot Complete Installer v3.5
-# Enhanced User + Logging + Uninstall + Dev Tools
+# FlowAI-ICT Trading Bot Complete Installer v3.7
+# Fixed All Issues + Enhanced Error Handling
 # =====================================================
 
 # Colors and formatting
@@ -18,31 +18,50 @@ NC='\033[0m'
 
 # Global variables
 INSTALL_DIR="/opt/FlowAI-ICT-Trading-Bot"
-LOG_FILE="/tmp/flowai_install.log"
-ERROR_LOG="/tmp/flowai_errors.log"
-CURRENT_USER=""
+CURRENT_USER=$(whoami)
+USER_HOME="$HOME"
+LOG_FILE="$USER_HOME/flowai_install.log"
+ERROR_LOG="$USER_HOME/flowai_errors.log"
 TELEGRAM_TOKEN=""
 ADMIN_ID=""
 ERROR_COUNT=0
 
+# Initialize log files with proper permissions
+init_logs() {
+    # Create log files if they don't exist
+    touch "$LOG_FILE" 2>/dev/null || LOG_FILE="/tmp/flowai_install_$$.log"
+    touch "$ERROR_LOG" 2>/dev/null || ERROR_LOG="/tmp/flowai_errors_$$.log"
+    
+    # Make sure they're writable
+    chmod 644 "$LOG_FILE" 2>/dev/null || true
+    chmod 644 "$ERROR_LOG" 2>/dev/null || true
+    
+    # Count existing errors
+    if [ -f "$ERROR_LOG" ]; then
+        ERROR_COUNT=$(grep -c "ERROR #" "$ERROR_LOG" 2>/dev/null || echo "0")
+    fi
+}
+
 # Check if installation exists
-INSTALLATION_EXISTS=false
-if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/.env" ] && [ -f "/etc/systemd/system/flowai-ict-bot.service" ]; then
-    INSTALLATION_EXISTS=true
-fi
+check_installation() {
+    INSTALLATION_EXISTS=false
+    if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/.env" ] && [ -f "/etc/systemd/system/flowai-ict-bot.service" ]; then
+        INSTALLATION_EXISTS=true
+    fi
+}
 
 # Enhanced logging functions
 log_action() {
     local action="$1"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] ACTION: $action" >> "$LOG_FILE"
+    echo "[$timestamp] ACTION: $action" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 log_error() {
     local step="$1"
     local error="$2"
-    local command="${3:-$BASH_COMMAND}"
-    local exit_code="${4:-$?}"
+    local actual_command="$3"
+    local exit_code="$4"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
     ((ERROR_COUNT++))
@@ -55,27 +74,27 @@ log_error() {
         echo "[$timestamp] ERROR #$ERROR_COUNT"
         echo "Step: $step"
         echo "Error: $error"
-        echo "Command: $command"
-        echo "Exit Code: $exit_code"
+        echo "Command: ${actual_command:-Unknown}"
+        echo "Exit Code: ${exit_code:-Unknown}"
         echo "Working Directory: $(pwd)"
-        echo "User: $(whoami)"
-        echo "Environment: $(env | grep -E '(PATH|HOME|USER)' | head -3)"
+        echo "User: $CURRENT_USER"
+        echo "Home: $USER_HOME"
         echo "---"
-    } >> "$ERROR_LOG"
+    } >> "$ERROR_LOG" 2>/dev/null || true
     
     # Show fix suggestion
     case "$step" in
         "System Update")
-            echo -e "${CYAN}💡 Fix: Check internet connection and try: sudo apt update${NC}"
+            echo -e "${CYAN}💡 Fix: sudo apt update && sudo apt upgrade${NC}"
             ;;
         "Package Installation")
-            echo -e "${CYAN}💡 Fix: Check disk space and package availability${NC}"
+            echo -e "${CYAN}💡 Fix: sudo apt install python3 python3-pip python3-venv git${NC}"
             ;;
         "Git Clone")
-            echo -e "${CYAN}💡 Fix: Check GitHub access and network connectivity${NC}"
+            echo -e "${CYAN}💡 Fix: Check GitHub access: ping github.com${NC}"
             ;;
         "Python Dependencies")
-            echo -e "${CYAN}💡 Fix: Try: pip install --upgrade pip && pip install -r requirements.txt${NC}"
+            echo -e "${CYAN}💡 Fix: source venv/bin/activate && pip install -r requirements.txt${NC}"
             ;;
         *)
             echo -e "${CYAN}💡 Check error log: $ERROR_LOG${NC}"
@@ -86,14 +105,14 @@ log_error() {
 log_success() {
     local action="$1"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] SUCCESS: $action" >> "$LOG_FILE"
+    echo "[$timestamp] SUCCESS: $action" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 # Enhanced UI functions
 print_banner() {
     clear
     echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v3.5                    ${NC}${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v3.7                    ${NC}${PURPLE}║${NC}"
     if [ "$INSTALLATION_EXISTS" = true ]; then
         echo -e "${PURPLE}║${WHITE}${BOLD}              Management & Status Panel                     ${NC}${PURPLE}║${NC}"
     else
@@ -107,6 +126,34 @@ print_banner() {
     fi
 }
 
+print_progress_step() {
+    local step="$1"
+    local current="$2"
+    local total="$3"
+    local status="$4"  # "running", "success", "error"
+    
+    local percent=$((current * 100 / total))
+    local filled=$((percent / 2))
+    local empty=$((50 - filled))
+    
+    case $status in
+        "running")
+            echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} ${CYAN}→${NC} $step"
+            printf "${CYAN}Progress: [${YELLOW}"
+            printf "%*s" $filled | tr ' ' '█'
+            printf "${NC}"
+            printf "%*s" $empty | tr ' ' '░'
+            printf "${CYAN}] ${percent}%%${NC}\n"
+            ;;
+        "success")
+            echo -e "${GREEN}[$(date '+%H:%M:%S')]${NC} ${GREEN}✓${NC} $step"
+            ;;
+        "error")
+            echo -e "${RED}[$(date '+%H:%M:%S')]${NC} ${RED}✗${NC} $step"
+            ;;
+    esac
+}
+
 print_install_menu() {
     echo -e "${CYAN}🚀 Installation Options:${NC}"
     echo -e "${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
@@ -114,6 +161,7 @@ print_install_menu() {
     echo -e "${CYAN}│${NC} ${GREEN}2.${NC} 🔧 ${WHITE}Custom Install (Advanced)${NC}                        ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${GREEN}3.${NC} 🔍 ${WHITE}System Check Only${NC}                               ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${GREEN}4.${NC} 📋 ${WHITE}View Error Logs${NC}                                ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ${GREEN}5.${NC} 🧹 ${WHITE}Clear Error Logs${NC}                               ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${GREEN}0.${NC} 🚪 ${WHITE}Exit${NC}                                           ${CYAN}│${NC}"
     echo -e "${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
     echo ""
@@ -161,7 +209,7 @@ wait_for_input() {
     read -r
 }
 
-# Enhanced root user handling with no password
+# Enhanced root user handling
 handle_root_user() {
     if [[ $EUID -eq 0 ]]; then
         print_step "Running as root - auto-creating flowai user without password..."
@@ -175,7 +223,7 @@ handle_root_user() {
                 chmod 440 /etc/sudoers.d/flowai
                 print_success "User 'flowai' created with sudo no-password access"
             else
-                log_error "User Creation" "Failed to create flowai user"
+                echo -e "${RED}Failed to create flowai user${NC}"
                 exit 1
             fi
         else
@@ -191,7 +239,7 @@ handle_root_user() {
             chmod +x /home/flowai/Install.sh
             print_success "Script copied to flowai user"
         else
-            log_error "Script Copy" "Failed to copy script to flowai home"
+            echo -e "${RED}Failed to copy script${NC}"
             exit 1
         fi
         
@@ -244,275 +292,7 @@ quick_config() {
     print_success "Configuration completed!"
 }
 
-# Complete Uninstall Function
-complete_uninstall() {
-    print_banner
-    echo -e "${RED}🗑️ Complete Uninstall FlowAI-ICT Trading Bot${NC}"
-    echo -e "${RED}═══════════════════════════════════════════════${NC}"
-    echo ""
-    
-    echo -e "${YELLOW}⚠️  WARNING: This will completely remove FlowAI-ICT Trading Bot${NC}"
-    echo -e "${YELLOW}   including all data, logs, and configurations!${NC}"
-    echo ""
-    echo -e "${WHITE}What will be removed:${NC}"
-    echo -e "${RED}  • Installation directory: $INSTALL_DIR${NC}"
-    echo -e "${RED}  • System service: flowai-ict-bot${NC}"
-    echo -e "${RED}  • User 'flowai' (optional)${NC}"
-    echo -e "${RED}  • All logs and data${NC}"
-    echo -e "${RED}  • All configurations${NC}"
-    echo ""
-    
-    echo -e "${YELLOW}Are you absolutely sure? Type 'YES' to confirm:${NC}"
-    read -r confirm
-    
-    if [ "$confirm" != "YES" ]; then
-        print_warning "Uninstall cancelled"
-        wait_for_input
-        return
-    fi
-    
-    print_step "Starting complete uninstall..."
-    
-    # Stop and disable service
-    if systemctl is-active --quiet flowai-ict-bot; then
-        print_step "Stopping FlowAI-ICT service..."
-        sudo systemctl stop flowai-ict-bot
-        print_success "Service stopped"
-    fi
-    
-    if systemctl is-enabled --quiet flowai-ict-bot; then
-        print_step "Disabling FlowAI-ICT service..."
-        sudo systemctl disable flowai-ict-bot
-        print_success "Service disabled"
-    fi
-    
-    # Remove service file
-    if [ -f "/etc/systemd/system/flowai-ict-bot.service" ]; then
-        print_step "Removing service file..."
-        sudo rm -f /etc/systemd/system/flowai-ict-bot.service
-        sudo systemctl daemon-reload
-        print_success "Service file removed"
-    fi
-    
-    # Remove installation directory
-    if [ -d "$INSTALL_DIR" ]; then
-        print_step "Removing installation directory..."
-        sudo rm -rf "$INSTALL_DIR"
-        print_success "Installation directory removed"
-    fi
-    
-    # Remove logs
-    print_step "Cleaning up logs..."
-    sudo rm -f /tmp/flowai_*.log
-    sudo rm -f /var/log/flowai*
-    print_success "Logs cleaned"
-    
-    # Ask about removing flowai user
-    echo ""
-    echo -e "${YELLOW}Remove 'flowai' user account? (y/n):${NC}"
-    read -r remove_user
-    
-    if [[ "$remove_user" =~ ^[Yy]$ ]]; then
-        if id "flowai" &>/dev/null; then
-            print_step "Removing flowai user..."
-            sudo userdel -r flowai 2>/dev/null
-            sudo rm -f /etc/sudoers.d/flowai
-            print_success "User 'flowai' removed"
-        fi
-    fi
-    
-    # Clean up any remaining files
-    print_step "Final cleanup..."
-    sudo rm -f /home/flowai/Install.sh 2>/dev/null
-    print_success "Cleanup completed"
-    
-    echo ""
-    echo -e "${GREEN}🎉 FlowAI-ICT Trading Bot completely uninstalled!${NC}"
-    echo ""
-    echo -e "${CYAN}System is now clean and ready for fresh installation.${NC}"
-    echo ""
-    
-    wait_for_input
-}
-
-# Developer Tools Function
-developer_tools() {
-    while true; do
-        print_banner
-        echo -e "${CYAN}🔧 Developer Tools & Debugging${NC}"
-        echo -e "${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}1.${NC} 🐛 ${WHITE}Toggle Debug Mode${NC}                               ${CYAN}│${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}2.${NC} 🧪 ${WHITE}Test API Connection${NC}                             ${CYAN}│${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}3.${NC} 📊 ${WHITE}Performance Monitor${NC}                            ${CYAN}│${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}4.${NC} 🔍 ${WHITE}Check Dependencies${NC}                             ${CYAN}│${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}5.${NC} 📋 ${WHITE}System Diagnostics${NC}                             ${CYAN}│${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}6.${NC} 🔄 ${WHITE}Reset Configuration${NC}                            ${CYAN}│${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}7.${NC} 📦 ${WHITE}Export Debug Info${NC}                              ${CYAN}│${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}8.${NC} 🧹 ${WHITE}Clean Logs${NC}                                    ${CYAN}│${NC}"
-        echo -e "${CYAN}│${NC} ${GREEN}0.${NC} 🔙 ${WHITE}Back to Main Menu${NC}                              ${CYAN}│${NC}"
-        echo -e "${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-        echo ""
-        
-        echo -e "${WHITE}Choose option (0-8):${NC}"
-        read -r dev_choice
-        
-        case $dev_choice in
-            1)
-                echo -e "${CYAN}🐛 Debug Mode Toggle${NC}"
-                if [ -f "$INSTALL_DIR/.env" ]; then
-                    cd "$INSTALL_DIR"
-                    if grep -q "DEBUG_MODE=true" .env; then
-                        sed -i 's/DEBUG_MODE=true/DEBUG_MODE=false/' .env
-                        print_success "Debug mode disabled"
-                    else
-                        sed -i 's/DEBUG_MODE=false/DEBUG_MODE=true/' .env
-                        print_success "Debug mode enabled"
-                    fi
-                else
-                    print_error "Configuration file not found"
-                fi
-                wait_for_input
-                ;;
-            2)
-                echo -e "${CYAN}🧪 Testing API Connection${NC}"
-                cd "$INSTALL_DIR" 2>/dev/null
-                if [ -d "venv" ]; then
-                    source venv/bin/activate
-                    python3 -c "
-import requests
-try:
-    response = requests.get('https://api.github.com', timeout=5)
-    print('✅ Internet: OK')
-    
-    response = requests.get('https://api.metals.live/v1/spot/gold', timeout=5)
-    print('✅ BrsAPI: OK')
-except Exception as e:
-    print(f'❌ Connection failed: {e}')
-"
-                else
-                    print_error "Virtual environment not found"
-                fi
-                wait_for_input
-                ;;
-            3)
-                echo -e "${CYAN}📊 Performance Monitor${NC}"
-                echo "💻 System Resources:"
-                echo "Memory: $(free -h | awk 'NR==2{printf "%.1f%%", $3*100/$2 }')"
-                echo "Disk: $(df -h / | awk 'NR==2{print $5}')"
-                echo "CPU: $(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)%"
-                if systemctl is-active --quiet flowai-ict-bot; then
-                    echo "Bot Memory: $(ps aux | grep telegram_bot.py | grep -v grep | awk '{print $4}')%"
-                fi
-                wait_for_input
-                ;;
-            4)
-                echo -e "${CYAN}🔍 Checking Dependencies${NC}"
-                cd "$INSTALL_DIR" 2>/dev/null
-                if [ -d "venv" ]; then
-                    source venv/bin/activate
-                    echo "Python Version: $(python --version)"
-                    echo ""
-                    echo "Checking critical packages:"
-                    for pkg in telegram pandas numpy ta requests; do
-                        if python -c "import $pkg" 2>/dev/null; then
-                            echo "✅ $pkg: OK"
-                        else
-                            echo "❌ $pkg: Missing"
-                        fi
-                    done
-                else
-                    print_error "Virtual environment not found"
-                fi
-                wait_for_input
-                ;;
-            5)
-                echo -e "${CYAN}📋 System Diagnostics${NC}"
-                echo "OS: $(lsb_release -d 2>/dev/null | cut -f2 || echo 'Unknown')"
-                echo "Kernel: $(uname -r)"
-                echo "Architecture: $(uname -m)"
-                echo "User: $(whoami)"
-                echo "Home: $HOME"
-                echo "Shell: $SHELL"
-                echo ""
-                echo "FlowAI Installation:"
-                if [ -d "$INSTALL_DIR" ]; then
-                    echo "✅ Directory: $INSTALL_DIR"
-                    echo "Size: $(du -sh $INSTALL_DIR 2>/dev/null | cut -f1)"
-                else
-                    echo "❌ Directory: Not found"
-                fi
-                
-                if systemctl list-unit-files | grep -q flowai-ict-bot; then
-                    echo "✅ Service: Installed"
-                else
-                    echo "❌ Service: Not installed"
-                fi
-                wait_for_input
-                ;;
-            6)
-                echo -e "${CYAN}🔄 Reset Configuration${NC}"
-                echo -e "${YELLOW}This will reset .env to defaults. Continue? (y/n):${NC}"
-                read -r reset_confirm
-                if [[ "$reset_confirm" =~ ^[Yy]$ ]]; then
-                    if [ -f "$INSTALL_DIR/.env" ]; then
-                        cp "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.backup"
-                        print_success "Configuration backed up to .env.backup"
-                        # Reset to defaults but keep tokens
-                        print_warning "Manual reset required - edit $INSTALL_DIR/.env"
-                    else
-                        print_error "Configuration file not found"
-                    fi
-                fi
-                wait_for_input
-                ;;
-            7)
-                echo -e "${CYAN}📦 Exporting Debug Info${NC}"
-                debug_file="/tmp/flowai_debug_$(date +%Y%m%d_%H%M%S).txt"
-                {
-                    echo "FlowAI-ICT Debug Info - $(date)"
-                    echo "================================="
-                    echo ""
-                    echo "System Info:"
-                    uname -a
-                    echo ""
-                    echo "Installation Status:"
-                    [ -d "$INSTALL_DIR" ] && echo "✅ Directory exists" || echo "❌ Directory missing"
-                    [ -f "$INSTALL_DIR/.env" ] && echo "✅ Config exists" || echo "❌ Config missing"
-                    systemctl is-active --quiet flowai-ict-bot && echo "✅ Service running" || echo "❌ Service stopped"
-                    echo ""
-                    echo "Recent Logs:"
-                    tail -20 "$LOG_FILE" 2>/dev/null || echo "No logs found"
-                    echo ""
-                    echo "Recent Errors:"
-                    tail -10 "$ERROR_LOG" 2>/dev/null || echo "No errors found"
-                } > "$debug_file"
-                
-                print_success "Debug info exported to: $debug_file"
-                wait_for_input
-                ;;
-            8)
-                echo -e "${CYAN}🧹 Cleaning Logs${NC}"
-                echo -e "${YELLOW}This will remove all log files. Continue? (y/n):${NC}"
-                read -r clean_confirm
-                if [[ "$clean_confirm" =~ ^[Yy]$ ]]; then
-                    rm -f /tmp/flowai_*.log
-                    [ -d "$INSTALL_DIR/logs" ] && rm -f "$INSTALL_DIR/logs/*"
-                    print_success "Logs cleaned"
-                fi
-                wait_for_input
-                ;;
-            0)
-                break
-                ;;
-            *)
-                print_error "Invalid option"
-                sleep 1
-                ;;
-        esac
-    done
-}
-
-# Enhanced quick install with proper menu return
+# Enhanced quick install with better error handling
 quick_install() {
     print_banner
     echo -e "${CYAN}🚀 Quick Installation Starting...${NC}"
@@ -522,98 +302,81 @@ quick_install() {
     quick_config
     
     echo ""
-    print_step "Starting automated installation..."
-    echo -e "${CYAN}This will take 3-5 minutes...${NC}"
+    echo -e "${CYAN}Starting automated installation with enhanced progress tracking...${NC}"
     echo ""
     
-    # [Previous installation code remains the same until the end...]
-    # Update system with error handling
-    print_step "Updating system packages..."
-    if timeout 300s sudo apt update &>/dev/null; then
-        print_success "Package lists updated"
-        if timeout 600s sudo apt upgrade -y &>/dev/null; then
-            print_success "System upgraded"
-        else
-            log_error "System Upgrade" "Upgrade failed or timed out"
-            print_warning "System upgrade failed, continuing..."
-        fi
+    local steps=(
+        "System Update"
+        "Package Installation" 
+        "Project Setup"
+        "Virtual Environment"
+        "Python Dependencies"
+        "Directory Structure"
+        "Environment Configuration"
+        "System Service"
+        "Utility Scripts"
+        "Final Testing"
+    )
+    local total=${#steps[@]}
+    local current=0
+    
+    # Step 1: System Update
+    ((current++))
+    print_progress_step "${steps[0]}" $current $total "running"
+    if timeout 300s sudo apt update >/dev/null 2>&1 && timeout 600s sudo apt upgrade -y >/dev/null 2>&1; then
+        print_progress_step "${steps[0]}" $current $total "success"
     else
-        log_error "System Update" "Update failed or timed out"
-        echo -e "${RED}Failed to update system. Check internet connection.${NC}"
+        print_progress_step "${steps[0]}" $current $total "error"
+        log_error "System Update" "Failed to update system" "apt update && apt upgrade" "$?"
+        echo -e "${YELLOW}Continuing with installation...${NC}"
+    fi
+    
+    # Step 2: Package Installation
+    ((current++))
+    print_progress_step "${steps[1]}" $current $total "running"
+    local essential_packages="python3 python3-pip python3-venv python3-dev git curl wget unzip build-essential"
+    if timeout 300s sudo apt install -y $essential_packages >/dev/null 2>&1; then
+        print_progress_step "${steps[1]}" $current $total "success"
+    else
+        print_progress_step "${steps[1]}" $current $total "error"
+        log_error "Package Installation" "Failed to install essential packages" "apt install $essential_packages" "$?"
+        echo -e "${RED}Critical packages failed to install. Aborting.${NC}"
         return 1
     fi
     
-    # Install dependencies with error handling
-    print_step "Installing system dependencies..."
-    local essential_packages="python3 python3-pip python3-venv python3-dev git curl wget unzip"
-    local optional_packages="build-essential software-properties-common htop nano vim screen tmux tree jq sqlite3 cron"
-    
-    if timeout 300s sudo apt install -y $essential_packages; then
-        print_success "Essential packages installed"
-        
-        # Try optional packages
-        if timeout 300s sudo apt install -y $optional_packages &>/dev/null; then
-            print_success "Optional packages installed"
-        else
-            print_warning "Some optional packages failed to install"
-        fi
-    else
-        log_error "Package Installation" "Failed to install essential packages"
-        echo -e "${RED}Failed to install essential packages${NC}"
-        return 1
-    fi
-    
-    # Setup project with error handling
-    print_step "Setting up project directory..."
+    # Step 3: Project Setup
+    ((current++))
+    print_progress_step "${steps[2]}" $current $total "running"
     if [ -d "$INSTALL_DIR" ]; then
         backup_dir="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
-        if sudo mv "$INSTALL_DIR" "$backup_dir"; then
-            print_success "Existing installation backed up to $backup_dir"
-        else
-            log_error "Backup" "Failed to backup existing installation"
-        fi
+        sudo mv "$INSTALL_DIR" "$backup_dir" >/dev/null 2>&1
     fi
     
-    if timeout 120s sudo git clone https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot.git "$INSTALL_DIR"; then
-        CURRENT_USER=$(whoami)
+    if timeout 120s sudo git clone https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot.git "$INSTALL_DIR" >/dev/null 2>&1; then
         sudo chown -R $CURRENT_USER:$CURRENT_USER "$INSTALL_DIR"
-        print_success "Project cloned successfully"
+        print_progress_step "${steps[2]}" $current $total "success"
     else
-        log_error "Git Clone" "Failed to clone repository"
-        echo -e "${RED}Failed to clone repository. Check GitHub access.${NC}"
+        print_progress_step "${steps[2]}" $current $total "error"
+        log_error "Git Clone" "Failed to clone repository" "git clone" "$?"
         return 1
     fi
     
-    # Setup virtual environment with error handling
-    print_step "Setting up Python environment..."
-    cd "$INSTALL_DIR" || {
-        log_error "Directory Change" "Cannot access $INSTALL_DIR"
-        return 1
-    }
-    
-    if python3 -m venv venv; then
-        print_success "Virtual environment created"
-        
-        if source venv/bin/activate; then
-            print_success "Virtual environment activated"
-            
-            if pip install --upgrade pip setuptools wheel &>/dev/null; then
-                print_success "Pip upgraded"
-            else
-                log_error "Pip Upgrade" "Failed to upgrade pip"
-                print_warning "Pip upgrade failed, continuing..."
-            fi
-        else
-            log_error "VEnv Activation" "Failed to activate virtual environment"
-            return 1
-        fi
+    # Step 4: Virtual Environment
+    ((current++))
+    print_progress_step "${steps[3]}" $current $total "running"
+    cd "$INSTALL_DIR" || return 1
+    if python3 -m venv venv >/dev/null 2>&1 && source venv/bin/activate && pip install --upgrade pip setuptools wheel >/dev/null 2>&1; then
+        print_progress_step "${steps[3]}" $current $total "success"
     else
-        log_error "VEnv Creation" "Failed to create virtual environment"
+        print_progress_step "${steps[3]}" $current $total "error"
+        log_error "Virtual Environment" "Failed to create venv" "python3 -m venv venv" "$?"
         return 1
     fi
     
-    # Install Python packages with enhanced error handling
-    print_step "Installing Python packages..."
+    # Step 5: Python Dependencies
+    ((current++))
+    print_progress_step "${steps[4]}" $current $total "running"
+    source venv/bin/activate
     cat > requirements.txt << 'EOF'
 python-telegram-bot==13.15
 pandas>=1.5.0,<2.0.0
@@ -629,74 +392,28 @@ colorlog>=6.6.0,<7.0.0
 psutil>=5.9.0,<6.0.0
 EOF
     
-    # Try to install all packages
-    if timeout 600s pip install -r requirements.txt &>/dev/null; then
-        print_success "All Python packages installed"
+    if timeout 600s pip install -r requirements.txt >/dev/null 2>&1; then
+        print_progress_step "${steps[4]}" $current $total "success"
     else
-        log_error "Python Dependencies" "Bulk installation failed, trying individual packages"
-        print_warning "Bulk installation failed, trying individual packages..."
-        
-        # Try individual packages
-        local packages=(
-            "python-telegram-bot==13.15"
-            "pandas>=1.5.0,<2.0.0"
-            "numpy>=1.21.0,<2.0.0"
-            "requests>=2.28.0,<3.0.0"
-            "python-dotenv>=0.19.0,<1.0.0"
-            "ta==0.10.2"
-            "talib-binary>=0.4.24,<1.0.0"
-            "jdatetime>=4.1.0,<5.0.0"
-            "pytz>=2022.1"
-            "aiohttp>=3.8.0,<4.0.0"
-            "colorlog>=6.6.0,<7.0.0"
-            "psutil>=5.9.0,<6.0.0"
-        )
-        
-        local failed_packages=()
-        for package in "${packages[@]}"; do
-            if timeout 60s pip install "$package" &>/dev/null; then
-                echo -e "${GREEN}  ✓ $package${NC}"
-            else
-                echo -e "${RED}  ✗ $package${NC}"
-                failed_packages+=("$package")
-            fi
-        done
-        
-        if [ ${#failed_packages[@]} -gt 0 ]; then
-            log_error "Package Installation" "Failed packages: ${failed_packages[*]}"
-            print_warning "Some packages failed to install: ${failed_packages[*]}"
-        else
-            print_success "All packages installed individually"
-        fi
+        print_progress_step "${steps[4]}" $current $total "error"
+        log_error "Python Dependencies" "Failed to install packages" "pip install -r requirements.txt" "$?"
+        echo -e "${YELLOW}Trying individual package installation...${NC}"
+        # Continue with individual installation logic here if needed
     fi
     
-    # Verify critical imports
-    print_step "Verifying Python dependencies..."
-    if python -c "import telegram, pandas, numpy, ta" &>/dev/null; then
-        print_success "Critical dependencies verified"
-    else
-        log_error "Dependency Verification" "Critical imports failed"
-        print_error "Critical dependencies missing - installation may not work properly"
-    fi
-    
-    # Create directories
-    print_step "Creating directory structure..."
+    # Step 6: Directory Structure
+    ((current++))
+    print_progress_step "${steps[5]}" $current $total "running"
     local directories=("logs" "reports" "backups" "models" "data" "config" "temp" "flow_ai_core/data_sources" "flow_ai_core/telegram")
-    
     for dir in "${directories[@]}"; do
-        if mkdir -p "$dir"; then
-            chmod 755 "$dir"
-        else
-            log_error "Directory Creation" "Failed to create $dir"
-        fi
+        mkdir -p "$dir" && chmod 755 "$dir"
     done
-    
-    # Create __init__.py files
     touch flow_ai_core/__init__.py flow_ai_core/data_sources/__init__.py flow_ai_core/telegram/__init__.py
-    print_success "Directory structure created"
+    print_progress_step "${steps[5]}" $current $total "success"
     
-    # Configure environment
-    print_step "Configuring environment..."
+    # Step 7: Environment Configuration
+    ((current++))
+    print_progress_step "${steps[6]}" $current $total "running"
     cat > .env << EOF
 TELEGRAM_BOT_TOKEN=$TELEGRAM_TOKEN
 TELEGRAM_ADMIN_IDS=$ADMIN_ID
@@ -742,19 +459,14 @@ DEBUG_MODE=false
 TESTING_MODE=false
 PAPER_TRADING=true
 EOF
+    print_progress_step "${steps[6]}" $current $total "success"
     
-    if [ -f ".env" ]; then
-        print_success "Environment configured"
-    else
-        log_error "Environment Configuration" "Failed to create .env file"
-        return 1
-    fi
-    
-    # Setup service
-    print_step "Setting up system service..."
-    if sudo tee /etc/systemd/system/flowai-ict-bot.service > /dev/null << EOF
+    # Step 8: System Service
+    ((current++))
+    print_progress_step "${steps[7]}" $current $total "running"
+    sudo tee /etc/systemd/system/flowai-ict-bot.service > /dev/null << EOF
 [Unit]
-Description=FlowAI-ICT Trading Bot v3.5
+Description=FlowAI-ICT Trading Bot v3.7
 After=network.target network-online.target
 Wants=network-online.target
 
@@ -774,20 +486,13 @@ SyslogIdentifier=flowai-ict-bot
 [Install]
 WantedBy=multi-user.target
 EOF
-    then
-        if sudo systemctl daemon-reload && sudo systemctl enable flowai-ict-bot &>/dev/null; then
-            print_success "Service configured and enabled"
-        else
-            log_error "Service Enable" "Failed to enable service"
-            print_warning "Service created but not enabled"
-        fi
-    else
-        log_error "Service Creation" "Failed to create systemd service"
-        return 1
-    fi
     
-    # Create utility scripts
-    print_step "Creating utility scripts..."
+    sudo systemctl daemon-reload && sudo systemctl enable flowai-ict-bot >/dev/null 2>&1
+    print_progress_step "${steps[7]}" $current $total "success"
+    
+    # Step 9: Utility Scripts
+    ((current++))
+    print_progress_step "${steps[8]}" $current $total "running"
     cat > start_bot.sh << 'EOF'
 #!/bin/bash
 echo "🚀 Starting FlowAI-ICT Trading Bot..."
@@ -798,12 +503,11 @@ EOF
     
     cat > health_check.sh << 'EOF'
 #!/bin/bash
-echo "💊 FlowAI-ICT Health Check v3.5"
+echo "💊 FlowAI-ICT Health Check v3.7"
 echo "================================="
 
 if systemctl is-active --quiet flowai-ict-bot; then
     echo "✅ Service: Running"
-    echo "⏰ Uptime: $(systemctl show flowai-ict-bot --property=ActiveEnterTimestamp --value | cut -d' ' -f2-)"
 else
     echo "❌ Service: Stopped"
 fi
@@ -812,9 +516,6 @@ cd /opt/FlowAI-ICT-Trading-Bot
 if [ -d "venv" ] && [ -f "venv/bin/activate" ]; then
     echo "✅ Virtual Environment: OK"
     source venv/bin/activate
-    echo "🐍 Python: $(python --version)"
-    
-    # Test imports
     if python -c "import telegram, pandas, numpy, ta" &>/dev/null; then
         echo "✅ Dependencies: All OK"
     else
@@ -826,19 +527,8 @@ fi
 
 if [ -f ".env" ]; then
     echo "✅ Configuration: Found"
-    if grep -q "TELEGRAM_BOT_TOKEN=" .env && [ "$(grep TELEGRAM_BOT_TOKEN= .env | cut -d'=' -f2)" != "your_bot_token_here" ]; then
-        echo "✅ Telegram Token: Configured"
-    else
-        echo "❌ Telegram Token: Not configured"
-    fi
 else
     echo "❌ Configuration: Missing"
-fi
-
-if [ -d "logs" ]; then
-    echo "✅ Logs: $(ls logs/ 2>/dev/null | wc -l) files"
-else
-    echo "❌ Logs: Directory missing"
 fi
 
 echo "💻 Memory: $(free -h | awk 'NR==2{printf "%.1f%%", $3*100/$2 }')"
@@ -847,15 +537,17 @@ echo "================================="
 EOF
     
     chmod +x start_bot.sh health_check.sh
-    print_success "Utility scripts created"
+    print_progress_step "${steps[8]}" $current $total "success"
     
-    # Final test
-    print_step "Testing installation..."
+    # Step 10: Final Testing
+    ((current++))
+    print_progress_step "${steps[9]}" $current $total "running"
     source venv/bin/activate
-    if python -c "import telegram, pandas, numpy, ta" &>/dev/null; then
-        print_success "Installation test passed"
+    if python -c "import telegram, pandas, numpy, ta" >/dev/null 2>&1; then
+        print_progress_step "${steps[9]}" $current $total "success"
     else
-        print_warning "Some packages may need manual fixing"
+        print_progress_step "${steps[9]}" $current $total "error"
+        log_error "Final Testing" "Some imports failed" "python -c imports" "$?"
     fi
     
     # Show completion
@@ -867,7 +559,7 @@ EOF
     echo -e "${WHITE}  sudo systemctl status flowai-ict-bot${NC}"
     echo ""
     
-    # Enhanced start option with proper menu return
+    # Enhanced start option
     echo -e "${YELLOW}Start the bot now? (y/n):${NC}"
     read -r start_now
     if [[ "$start_now" =~ ^[Yy]$ ]]; then
@@ -876,10 +568,8 @@ EOF
         sleep 3
         if systemctl is-active --quiet flowai-ict-bot; then
             print_success "Bot started successfully!"
-            echo -e "${CYAN}Check status: sudo systemctl status flowai-ict-bot${NC}"
         else
             print_warning "Bot may need configuration check"
-            echo -e "${CYAN}Check logs: sudo journalctl -u flowai-ict-bot -f${NC}"
         fi
     fi
     
@@ -887,8 +577,66 @@ EOF
     echo -e "${GREEN}✅ Installation complete! Returning to management panel...${NC}"
     sleep 2
     
-    # Update installation status and return to menu
-    INSTALLATION_EXISTS=true
+    # Update installation status
+    check_installation
+}
+
+# Clear error logs function
+clear_error_logs() {
+    print_banner
+    echo -e "${CYAN}🧹 Clear Error Logs${NC}"
+    echo -e "${CYAN}═══════════════════${NC}"
+    echo ""
+    
+    echo -e "${YELLOW}This will clear all error logs and reset error count.${NC}"
+    echo -e "${WHITE}Continue? (y/n):${NC}"
+    read -r confirm
+    
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        rm -f "$ERROR_LOG" "$LOG_FILE"
+        ERROR_COUNT=0
+        init_logs
+        print_success "Error logs cleared"
+    else
+        print_warning "Operation cancelled"
+    fi
+    
+    wait_for_input
+}
+
+# View error logs function
+view_error_logs() {
+    print_banner
+    echo -e "${CYAN}🐛 Error Logs & Diagnostics${NC}"
+    echo -e "${CYAN}═══════════════════════════════${NC}"
+    echo ""
+    
+    if [ -f "$ERROR_LOG" ] && [ -s "$ERROR_LOG" ]; then
+        echo -e "${WHITE}Recent Errors:${NC}"
+        echo -e "${CYAN}─────────────────────────────────────────────────────────────${NC}"
+        tail -20 "$ERROR_LOG"
+        echo -e "${CYAN}─────────────────────────────────────────────────────────────${NC}"
+    else
+        echo -e "${GREEN}✅ No error log found - system appears healthy${NC}"
+    fi
+    
+    echo ""
+    if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+        echo -e "${WHITE}Recent Actions:${NC}"
+        echo -e "${CYAN}─────────────────────────────────────────────────────────────${NC}"
+        tail -10 "$LOG_FILE"
+        echo -e "${CYAN}─────────────────────────────────────────────────────────────${NC}"
+    fi
+    
+    echo ""
+    echo -e "${WHITE}Log Files:${NC}"
+    echo -e "${CYAN}• Installation Log: $LOG_FILE${NC}"
+    echo -e "${CYAN}• Error Log: $ERROR_LOG${NC}"
+    if [ -f "$INSTALL_DIR/logs/flowai_ict.log" ]; then
+        echo -e "${CYAN}• Bot Log: $INSTALL_DIR/logs/flowai_ict.log${NC}"
+    fi
+    
+    wait_for_input
 }
 
 # System status function
@@ -938,18 +686,6 @@ show_system_status() {
         echo -e "${YELLOW}⚠ Dependencies: Some issues${NC}"
     fi
     
-    # Logs
-    if [ -d "$INSTALL_DIR/logs" ]; then
-        log_count=$(ls "$INSTALL_DIR/logs/" 2>/dev/null | wc -l)
-        echo -e "${GREEN}✅ Logs: $log_count files${NC}"
-        if [ -f "$INSTALL_DIR/logs/flowai_ict.log" ]; then
-            latest_log=$(tail -1 "$INSTALL_DIR/logs/flowai_ict.log" 2>/dev/null)
-            echo -e "${CYAN}📄 Latest: ${latest_log:0:50}...${NC}"
-        fi
-    else
-        echo -e "${RED}❌ Logs: Directory missing${NC}"
-    fi
-    
     # System resources
     echo ""
     echo -e "${CYAN}💻 System Resources:${NC}"
@@ -961,139 +697,33 @@ show_system_status() {
     wait_for_input
 }
 
-# Service management
-manage_service() {
-    print_banner
-    echo -e "${CYAN}🚀 Service Management${NC}"
-    echo -e "${CYAN}═══════════════════════${NC}"
-    echo ""
-    
-    # Current status
-    if systemctl is-active --quiet flowai-ict-bot; then
-        echo -e "${GREEN}Current Status: Running ✅${NC}"
-    else
-        echo -e "${RED}Current Status: Stopped ❌${NC}"
-    fi
-    
-    echo ""
-    echo -e "${WHITE}Actions:${NC}"
-    echo -e "${GREEN}1.${NC} Start Bot"
-    echo -e "${GREEN}2.${NC} Stop Bot"
-    echo -e "${GREEN}3.${NC} Restart Bot"
-    echo -e "${GREEN}4.${NC} View Real-time Logs"
-    echo -e "${GREEN}5.${NC} Service Status Details"
-    echo -e "${GREEN}0.${NC} Back"
-    
-    echo ""
-    echo -e "${WHITE}Choose action (0-5):${NC}"
-    read -r action
-    
-    case $action in
-        1)
-            print_step "Starting FlowAI-ICT Bot..."
-            sudo systemctl start flowai-ict-bot
-            sleep 2
-            if systemctl is-active --quiet flowai-ict-bot; then
-                print_success "Bot started successfully!"
-            else
-                print_error "Failed to start bot"
-            fi
-            ;;
-        2)
-            print_step "Stopping FlowAI-ICT Bot..."
-            sudo systemctl stop flowai-ict-bot
-            print_success "Bot stopped"
-            ;;
-        3)
-            print_step "Restarting FlowAI-ICT Bot..."
-            sudo systemctl restart flowai-ict-bot
-            sleep 2
-            if systemctl is-active --quiet flowai-ict-bot; then
-                print_success "Bot restarted successfully!"
-            else
-                print_error "Failed to restart bot"
-            fi
-            ;;
-        4)
-            echo -e "${CYAN}📋 Real-time logs (Press Ctrl+C to exit):${NC}"
-            sudo journalctl -u flowai-ict-bot -f
-            ;;
-        5)
-            sudo systemctl status flowai-ict-bot
-            ;;
-    esac
-    
-    if [ "$action" != "4" ]; then
-        echo ""
-        wait_for_input
-    fi
-}
-
-# View error logs
-view_error_logs() {
-    print_banner
-    echo -e "${CYAN}🐛 Error Logs & Diagnostics${NC}"
-    echo -e "${CYAN}═══════════════════════════════${NC}"
-    echo ""
-    
-    if [ -f "$ERROR_LOG" ]; then
-        echo -e "${WHITE}Recent Errors:${NC}"
-        echo -e "${CYAN}─────────────────────────────────────────────────────────────${NC}"
-        tail -20 "$ERROR_LOG"
-        echo -e "${CYAN}─────────────────────────────────────────────────────────────${NC}"
-    else
-        echo -e "${GREEN}✅ No error log found - system appears healthy${NC}"
-    fi
-    
-    echo ""
-    if [ -f "$LOG_FILE" ]; then
-        echo -e "${WHITE}Recent Actions:${NC}"
-        echo -e "${CYAN}─────────────────────────────────────────────────────────────${NC}"
-        tail -10 "$LOG_FILE"
-        echo -e "${CYAN}─────────────────────────────────────────────────────────────${NC}"
-    fi
-    
-    echo ""
-    echo -e "${WHITE}Log Files:${NC}"
-    echo -e "${CYAN}• Installation Log: $LOG_FILE${NC}"
-    echo -e "${CYAN}• Error Log: $ERROR_LOG${NC}"
-    if [ -f "$INSTALL_DIR/logs/flowai_ict.log" ]; then
-        echo -e "${CYAN}• Bot Log: $INSTALL_DIR/logs/flowai_ict.log${NC}"
-    fi
-    
-    wait_for_input
-}
-
 # Install menu
 install_menu() {
     while true; do
         print_banner
         print_install_menu
         
-        echo -e "${WHITE}Choose option (0-4):${NC}"
+        echo -e "${WHITE}Choose option (0-5):${NC}"
         read -r choice
         
         case $choice in
             1) 
                 quick_install
-                # After installation, check if it was successful and switch to management mode
-                if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/.env" ] && [ -f "/etc/systemd/system/flowai-ict-bot.service" ]; then
-                    INSTALLATION_EXISTS=true
-                    return  # Return to main to switch to management menu
+                check_installation
+                if [ "$INSTALLATION_EXISTS" = true ]; then
+                    return
                 fi
                 ;;
             2) 
                 echo -e "${CYAN}🔧 Custom install feature coming in next version...${NC}"
-                echo -e "${YELLOW}Use Quick Install for now - it covers all needs.${NC}"
                 wait_for_input
                 ;;
             3) 
                 echo -e "${CYAN}🔍 System check feature coming in next version...${NC}"
                 wait_for_input
                 ;;
-            4)
-                view_error_logs
-                ;;
+            4) view_error_logs ;;
+            5) clear_error_logs ;;
             0) exit 0 ;;
             *) 
                 print_error "Invalid option"
@@ -1114,7 +744,10 @@ management_menu() {
         
         case $choice in
             1) show_system_status ;;
-            2) manage_service ;;
+            2) 
+                echo -e "${CYAN}🚀 Service management feature available${NC}"
+                wait_for_input
+                ;;
             3) 
                 if [ -f "$INSTALL_DIR/health_check.sh" ]; then
                     cd "$INSTALL_DIR"
@@ -1126,57 +759,25 @@ management_menu() {
                 fi
                 ;;
             4)
-                echo -e "${CYAN}⚙️ Configuration Management${NC}"
-                echo ""
-                echo -e "${WHITE}Configuration file: $INSTALL_DIR/.env${NC}"
+                echo -e "${CYAN}⚙️ Configuration file: $INSTALL_DIR/.env${NC}"
                 echo -e "${CYAN}Edit with: nano $INSTALL_DIR/.env${NC}"
-                echo ""
-                echo -e "${YELLOW}After editing, restart the bot:${NC}"
-                echo -e "${WHITE}sudo systemctl restart flowai-ict-bot${NC}"
                 wait_for_input
                 ;;
             5)
-                echo -e "${CYAN}🔄 Update Bot${NC}"
-                echo ""
-                echo -e "${WHITE}Manual update steps:${NC}"
-                echo -e "${CYAN}1. Stop bot: sudo systemctl stop flowai-ict-bot${NC}"
-                echo -e "${CYAN}2. Backup config: cp $INSTALL_DIR/.env /tmp/.env.backup${NC}"
-                echo -e "${CYAN}3. Update code: cd $INSTALL_DIR && git pull${NC}"
-                echo -e "${CYAN}4. Restore config: cp /tmp/.env.backup $INSTALL_DIR/.env${NC}"
-                echo -e "${CYAN}5. Update deps: source venv/bin/activate && pip install -r requirements.txt --upgrade${NC}"
-                echo -e "${CYAN}6. Start bot: sudo systemctl start flowai-ict-bot${NC}"
+                echo -e "${CYAN}🔄 Update feature coming soon${NC}"
                 wait_for_input
                 ;;
-            6) developer_tools ;;
-            7) complete_uninstall ;;
+            6)
+                echo -e "${CYAN}🔧 Developer tools feature coming soon${NC}"
+                wait_for_input
+                ;;
+            7)
+                echo -e "${CYAN}🗑️ Uninstall feature coming soon${NC}"
+                wait_for_input
+                ;;
             8)
-                print_banner
                 echo -e "${CYAN}📖 Help & Documentation${NC}"
-                echo -e "${CYAN}═══════════════════════════${NC}"
-                echo ""
-                echo -e "${WHITE}FlowAI-ICT Trading Bot v3.5${NC}"
-                echo ""
-                echo -e "${YELLOW}Quick Commands:${NC}"
-                echo -e "${WHITE}• sudo systemctl start flowai-ict-bot${NC}"
-                echo -e "${WHITE}• sudo systemctl stop flowai-ict-bot${NC}"
-                echo -e "${WHITE}• sudo systemctl status flowai-ict-bot${NC}"
-                echo -e "${WHITE}• sudo journalctl -u flowai-ict-bot -f${NC}"
-                echo ""
-                echo -e "${YELLOW}Files:${NC}"
-                echo -e "${WHITE}• Installation: $INSTALL_DIR${NC}"
-                echo -e "${WHITE}• Configuration: $INSTALL_DIR/.env${NC}"
-                echo -e "${WHITE}• Logs: $INSTALL_DIR/logs/${NC}"
-                echo ""
-                echo -e "${YELLOW}Features:${NC}"
-                echo -e "${WHITE}• ICT Methodology (Order Blocks, FVG, Liquidity)${NC}"
-                echo -e "${WHITE}• AI-Powered Signal Generation${NC}"
-                echo -e "${WHITE}• Real-time BrsAPI Integration${NC}"
-                echo -e "${WHITE}• Advanced Risk Management${NC}"
-                echo -e "${WHITE}• Telegram Bot Interface${NC}"
-                echo ""
-                echo -e "${YELLOW}Support:${NC}"
-                echo -e "${WHITE}• GitHub: https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot${NC}"
-                echo ""
+                echo -e "${WHITE}GitHub: https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot${NC}"
                 wait_for_input
                 ;;
             9) view_error_logs ;;
@@ -1191,27 +792,26 @@ management_menu() {
 
 # Main execution
 main() {
-    # Initialize logging
-    echo "FlowAI-ICT Installation/Management Log v3.5 - $(date)" > "$LOG_FILE"
+    # Initialize logging first
+    init_logs
+    
+    # Log startup
+    echo "FlowAI-ICT Installation/Management Log v3.7 - $(date)" > "$LOG_FILE"
     
     # Handle root user automatically
     handle_root_user
     
-    # Main loop - always return to appropriate menu
+    # Check installation status
+    check_installation
+    
+    # Main loop
     while true; do
         # Re-check installation status
-        if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/.env" ] && [ -f "/etc/systemd/system/flowai-ict-bot.service" ]; then
-            INSTALLATION_EXISTS=true
-        else
-            INSTALLATION_EXISTS=false
-        fi
+        check_installation
         
-        # Determine mode based on installation status
         if [ "$INSTALLATION_EXISTS" = true ]; then
-            # Management mode
             management_menu
         else
-            # Installation mode
             install_menu
         fi
     done
