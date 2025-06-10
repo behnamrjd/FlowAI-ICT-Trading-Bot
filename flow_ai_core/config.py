@@ -129,10 +129,6 @@ except (ValueError, TypeError):
     ICT_PD_RETRACEMENT_LEVELS = [0.5, 0.618, 0.786]
     logger.warning("Invalid PD retracement levels, using defaults")
 
-# Log configuration summary
-logger.debug(f"Trading Symbol: {SYMBOL}, LTF: {TIMEFRAME}, HTFs: {HTF_TIMEFRAMES}")
-logger.info("Configuration loaded successfully.")
-
 # ===== ADVANCED AI CONFIGURATION =====
 AI_ADVANCED_FEATURES = get_env_var("AI_ADVANCED_FEATURES", True, var_type=bool)
 AI_TIME_BASED_FILTERING = get_env_var("AI_TIME_BASED_FILTERING", True, var_type=bool)
@@ -164,47 +160,14 @@ SESSION_STRENGTH_THRESHOLD = get_env_var("SESSION_STRENGTH_THRESHOLD", 0.5, var_
 # Extended Trading Hours (UTC)
 EXTENDED_TRADING_HOURS = [(6, 12), (12, 18), (18, 24)]
 
-# Advanced Target Thresholds v3.0
-AI_STRONG_BUY_THRESHOLD = get_env_var("AI_STRONG_BUY_THRESHOLD", 0.008, var_type=float)
-AI_BUY_THRESHOLD = get_env_var("AI_BUY_THRESHOLD", 0.003, var_type=float)
-AI_HOLD_THRESHOLD = get_env_var("AI_HOLD_THRESHOLD", 0.001, var_type=float)
-AI_SELL_THRESHOLD = get_env_var("AI_SELL_THRESHOLD", -0.003, var_type=float)
-AI_STRONG_SELL_THRESHOLD = get_env_var("AI_STRONG_SELL_THRESHOLD", -0.008, var_type=float)
-
 # Model Configuration v3.0
 MODEL_VERSION = get_env_var("MODEL_VERSION", "3.0")
-MODEL_METADATA_PATH = get_env_var("MODEL_METADATA_PATH", "model_metadata.pkl")
 
 # ===== TIMEZONE CONFIGURATION =====
 TIMEZONE = get_env_var('TIMEZONE', 'Asia/Tehran')
 UTC_OFFSET = '+0330'
 
 # ===== ENHANCED DATA CONFIGURATION =====
-# Primary and fallback symbols for better data quality
-PRIMARY_SYMBOLS = {
-    'GOLD': ['XAUUSD=X', 'GC=F', 'GLD', 'IAU'],
-    'SILVER': ['XAGUSD=X', 'SI=F', 'SLV'],
-    'OIL': ['CL=F', 'USO', 'XOM']
-}
-
-# Data quality settings
-MAX_DATA_DELAY_MINUTES = get_env_var('MAX_DATA_DELAY_MINUTES', 15, var_type=int)
-ENABLE_REAL_TIME_FALLBACK = get_env_var('ENABLE_REAL_TIME_FALLBACK', True, var_type=bool)
-CACHE_DURATION_MINUTES = get_env_var('CACHE_DURATION_MINUTES', 5, var_type=int)
-
-# Enhanced symbol configuration
-SYMBOL = get_env_var("SYMBOL", "XAUUSD=X")  # Changed from GC=F
-FALLBACK_SYMBOLS = get_env_var("FALLBACK_SYMBOLS", "GC=F,GLD,IAU", var_type=list)
-
-# Real-time data validation
-VALIDATE_DATA_FRESHNESS = get_env_var('VALIDATE_DATA_FRESHNESS', True, var_type=bool)
-MIN_CANDLES_FOR_ANALYSIS = get_env_var('MIN_CANDLES_FOR_ANALYSIS', 50, var_type=int)
-
-# Price validation thresholds
-MAX_PRICE_DEVIATION_PCT = get_env_var('MAX_PRICE_DEVIATION_PCT', 5.0, var_type=float)
-ENABLE_PRICE_VALIDATION = get_env_var('ENABLE_PRICE_VALIDATION', True, var_type=bool)
-
-# ===== ENHANCED DATA CONFIGURATION =====
 PRIMARY_SYMBOLS = {
     'GOLD': ['XAUUSD=X', 'GC=F', 'GLD', 'IAU'],
     'SILVER': ['XAGUSD=X', 'SI=F', 'SLV'],
@@ -219,3 +182,7 @@ VALIDATE_DATA_FRESHNESS = get_env_var('VALIDATE_DATA_FRESHNESS', True, var_type=
 MIN_CANDLES_FOR_ANALYSIS = get_env_var('MIN_CANDLES_FOR_ANALYSIS', 50, var_type=int)
 MAX_PRICE_DEVIATION_PCT = get_env_var('MAX_PRICE_DEVIATION_PCT', 5.0, var_type=float)
 ENABLE_PRICE_VALIDATION = get_env_var('ENABLE_PRICE_VALIDATION', True, var_type=bool)
+
+# Log configuration summary
+logger.debug(f"Trading Symbol: {SYMBOL}, LTF: {TIMEFRAME}, HTFs: {HTF_TIMEFRAMES}")
+logger.info("Configuration loaded successfully.")
