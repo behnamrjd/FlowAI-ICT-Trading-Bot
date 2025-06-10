@@ -196,3 +196,20 @@ PRICE_ENGINE_PRIMARY = get_env_var('PRICE_ENGINE_PRIMARY', 'BrsAPI')
 PRICE_ENGINE_FALLBACK = get_env_var('PRICE_ENGINE_FALLBACK', 'GoldAPI')
 PRICE_VALIDATION_ENABLED = get_env_var('PRICE_VALIDATION_ENABLED', True, var_type=bool)
 PRICE_HISTORY_LIMIT = get_env_var('PRICE_HISTORY_LIMIT', 100, var_type=int)
+
+
+# ===== TELEGRAM ADMIN CONFIGURATION =====
+TELEGRAM_ADMIN_IDS = get_env_var('TELEGRAM_ADMIN_IDS', '262182607', var_type=list)
+TELEGRAM_PREMIUM_USERS = get_env_var('TELEGRAM_PREMIUM_USERS', '', var_type=list)
+
+# تبدیل به integer
+try:
+    TELEGRAM_ADMIN_IDS = [int(id_str) for id_str in TELEGRAM_ADMIN_IDS if id_str.strip()]
+    TELEGRAM_PREMIUM_USERS = [int(id_str) for id_str in TELEGRAM_PREMIUM_USERS if id_str.strip()]
+except ValueError:
+    logger.warning("Invalid admin or premium user IDs in config")
+    TELEGRAM_ADMIN_IDS = [262182607]  # fallback به ID شما
+    TELEGRAM_PREMIUM_USERS = []
+
+logger.info(f"Telegram Admin IDs: {TELEGRAM_ADMIN_IDS}")
+logger.info(f"Telegram Premium Users: {TELEGRAM_PREMIUM_USERS}")

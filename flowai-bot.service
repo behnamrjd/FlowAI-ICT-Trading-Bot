@@ -1,0 +1,25 @@
+[Unit]
+Description=FlowAI Trading Bot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/FlowAI-ICT-Trading-Bot
+Environment=PATH=/opt/FlowAI-ICT-Trading-Bot/venv/bin
+ExecStart=/opt/FlowAI-ICT-Trading-Bot/venv/bin/python telegram_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=flowai-bot
+
+# Security settings
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/FlowAI-ICT-Trading-Bot
+
+[Install]
+WantedBy=multi-user.target

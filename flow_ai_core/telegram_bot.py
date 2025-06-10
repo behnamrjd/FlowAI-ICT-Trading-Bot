@@ -1,193 +1,195 @@
-"""
-FlowAI ICT Trading Bot Telegram Integration
-Handles all Telegram bot functionality and notifications
-"""
-
-import requests
 import logging
-from typing import Optional, Dict, Any
+import sys
+import os
+import signal
+import threading
+import time
 from datetime import datetime
-from . import config
 
-# Setup logger
-logger = logging.getLogger("FlowAI_Bot")
+# اضافه کردن مسیر پروژه
+sys.path.append('/opt/FlowAI-ICT-Trading-Bot')
 
-class TelegramBot:
-    """
-    Handles Telegram bot operations
-    """
-    
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
+from flow_ai_core.telegram import setup_telegram_handlers
+from flow_ai_core.config import TELEGRAM_BOT_TOKEN
+from flow_ai_core.telegram.signal_manager import start_signal_monitoring, stop_signal_monitoring
+from flow_ai_core.reporting_engine import generate_daily_report
+from flow_ai_core.notification_system import send_system_alert
+
+# تنظیم logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler('logs/telegram_bot.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class FlowAITelegramBot:
     def __init__(self):
-        self.bot_token = config.TELEGRAM_BOT_TOKEN
-        self.chat_id = config.TELEGRAM_CHAT_ID
-        self.enabled = config.TELEGRAM_ENABLED
-        self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
+        self.updater = None
+        self.running = False
+        self.start_time = datetime.now()
         
-    def send_message(self, message: str, parse_mode: str = "Markdown") -> bool:
-        """
-        Send message to Telegram chat
-        """
-        if not self.enabled or not self.bot_token or not self.chat_id:
-            logger.debug("Telegram not configured or disabled")
-            return False
+        # ایجاد فولدر logs
+        os.makedirs('logs', exist_ok=True)
+        
+    def error_handler(self, update, context):
+        """مدیریت خطاهای تلگرام"""
+        logger.error(f"Update {update} caused error {context.error}")
+        
+        if update and update.effective_message:
+            try:
+                update.effective_message.reply_text(
+                    "❌ خطایی رخ داده است. لطفاً دوباره تلاش کنید.\n\n"
+                    "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیرید."
+                )
+            except Exception as e:
+                logger.error(f"Error sending error message: {e}")
+        
+        # ارسال هشدار به ادمین‌ها
+        try:
+            error_message = f"خطا در ربات تلگرام:\n{str(context.error)}"
+            send_system_alert("error", error_message, admin_only=True)
+        except Exception as e:
+            logger.error(f"Failed to send error alert: {e}")
+    
+    def signal_handler(self, signum, frame):
+        """مدیریت سیگنال‌های سیستم"""
+        logger.info(f"Received signal {signum}, shutting down gracefully...")
+        self.shutdown()
+    
+    def shutdown(self):
+        """خاموش کردن ایمن ربات"""
+        logger.info("🛑 Shutting down FlowAI Telegram Bot...")
         
         try:
-            url = f"{self.base_url}/sendMessage"
-            data = {
-                'chat_id': self.chat_id,
-                'text': message,
-                'parse_mode': parse_mode,
-                'disable_web_page_preview': True
-            }
+            # توقف نظارت سیگنال‌ها
+            stop_signal_monitoring()
+            logger.info("Signal monitoring stopped")
             
-            response = requests.post(url, data=data, timeout=10)
+            # تولید گزارش نهایی
+            try:
+                final_report = generate_daily_report()
+                logger.info("Final daily report generated")
+            except Exception as e:
+                logger.error(f"Error generating final report: {e}")
             
-            if response.status_code == 200:
-                logger.info("Telegram message sent successfully")
-                return True
-            else:
-                logger.error(f"Failed to send Telegram message: {response.status_code} - {response.text}")
-                return False
+            # توقف updater
+            if self.updater:
+                self.updater.stop()
+                logger.info("Telegram updater stopped")
+            
+            # ارسال اطلاع توقف به ادمین‌ها
+            try:
+                uptime = datetime.now() - self.start_time
+                shutdown_message = f"ربات FlowAI متوقف شد.\n\nمدت فعالیت: {uptime}"
+                send_system_alert("info", shutdown_message, admin_only=True)
+            except Exception as e:
+                logger.error(f"Error sending shutdown alert: {e}")
+            
+            self.running = False
+            logger.info("✅ FlowAI Telegram Bot shutdown completed")
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+    
+    def health_check_loop(self):
+        """حلقه بررسی سلامت سیستم"""
+        while self.running:
+            try:
+                # بررسی وضعیت کلی سیستم
+                current_time = datetime.now()
+                uptime = current_time - self.start_time
                 
-        except Exception as e:
-            logger.error(f"Error sending Telegram message: {e}")
-            return False
+                # لاگ وضعیت هر ساعت
+                if uptime.total_seconds() % 3600 < 60:  # هر ساعت
+                    logger.info(f"Health check: Bot running for {uptime}")
+                
+                # بررسی‌های سلامت اضافی می‌تواند اینجا اضافه شود
+                # مثل بررسی اتصال API، حافظه، CPU و غیره
+                
+                time.sleep(60)  # بررسی هر دقیقه
+                
+            except Exception as e:
+                logger.error(f"Error in health check: {e}")
+                time.sleep(60)
     
-    def send_signal(self, signal_type: str, symbol: str, price: float, 
-                   confidence: float, analysis: Dict[str, Any]) -> bool:
-        """
-        Send trading signal to Telegram
-        """
+    def start(self):
+        """شروع ربات تلگرام"""
         try:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            logger.info("🚀 Starting FlowAI Telegram Bot...")
             
-            # Determine emoji based on signal type
-            signal_emoji = {
-                'BUY': '🟢',
-                'SELL': '🔴', 
-                'HOLD': '🟡'
-            }.get(signal_type.upper(), '⚪')
+            # بررسی توکن
+            if not TELEGRAM_BOT_TOKEN:
+                logger.error("❌ TELEGRAM_BOT_TOKEN not found in config!")
+                return False
             
-            message = f"""
-🚨 **FlowAI XAU Trading Signal** 🚨
-
-{signal_emoji} **Signal:** {signal_type.upper()}
-📊 **Symbol:** {symbol}
-💰 **Price:** ${price:,.2f}
-⏰ **Time:** {timestamp}
-
-🤖 **AI Analysis:**
-   • Confidence: {confidence*100:.1f}%
-   • HTF Bias: {analysis.get('htf_bias', 'N/A')}
-   • Risk Level: {analysis.get('risk_level', 'MEDIUM')}
-
-📋 **Technical Analysis:**
-   • RSI: {analysis.get('rsi', 'N/A')}
-   • Trend: {analysis.get('trend', 'N/A')}
-   • Volume: {analysis.get('volume_status', 'N/A')}
-
-⚠️ **Risk Management:**
-   • Stop Loss: {analysis.get('stop_loss', 'Calculate based on ATR')}
-   • Take Profit: {analysis.get('take_profit', 'Calculate based on R:R')}
-
-🎯 **Powered by FlowAI v2.0**
-            """.strip()
+            # ایجاد updater
+            self.updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+            dispatcher = self.updater.dispatcher
             
-            return self.send_message(message)
+            # راه‌اندازی handler های تلگرام
+            setup_telegram_handlers(dispatcher)
+            
+            # اضافه کردن error handler
+            dispatcher.add_error_handler(self.error_handler)
+            
+            # تنظیم signal handlers
+            signal.signal(signal.SIGINT, self.signal_handler)
+            signal.signal(signal.SIGTERM, self.signal_handler)
+            
+            # شروع ربات
+            self.updater.start_polling(drop_pending_updates=True)
+            self.running = True
+            
+            logger.info("🤖 FlowAI Telegram Bot started successfully!")
+            logger.info("📱 Bot is ready to receive messages...")
+            
+            # شروع نظارت خودکار سیگنال‌ها
+            try:
+                start_signal_monitoring()
+                logger.info("📡 Automatic signal monitoring started")
+            except Exception as e:
+                logger.error(f"Error starting signal monitoring: {e}")
+            
+            # شروع health check در thread جداگانه
+            health_thread = threading.Thread(target=self.health_check_loop, daemon=True)
+            health_thread.start()
+            
+            # ارسال اطلاع شروع به ادمین‌ها
+            try:
+                startup_message = f"ربات FlowAI با موفقیت راه‌اندازی شد.\n\nزمان شروع: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                send_system_alert("info", startup_message, admin_only=True)
+            except Exception as e:
+                logger.error(f"Error sending startup alert: {e}")
+            
+            # نگه داشتن ربات فعال
+            self.updater.idle()
+            
+            return True
             
         except Exception as e:
-            logger.error(f"Error sending signal message: {e}")
+            logger.error(f"❌ Error starting bot: {e}")
             return False
+        finally:
+            self.shutdown()
+
+def main():
+    """تابع اصلی"""
+    bot = FlowAITelegramBot()
     
-    def send_status_update(self, status: str, details: Dict[str, Any] = None) -> bool:
-        """
-        Send bot status update
-        """
-        try:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            message = f"""
-🤖 **FlowAI Bot Status Update**
+    try:
+        success = bot.start()
+        if not success:
+            sys.exit(1)
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        sys.exit(1)
 
-📊 **Status:** {status}
-⏰ **Time:** {timestamp}
-            """
-            
-            if details:
-                message += "\n\n📋 **Details:**"
-                for key, value in details.items():
-                    message += f"\n   • {key}: {value}"
-            
-            message += "\n\n🎯 **FlowAI XAU Trading Bot v2.0**"
-            
-            return self.send_message(message.strip())
-            
-        except Exception as e:
-            logger.error(f"Error sending status update: {e}")
-            return False
-    
-    def send_error_notification(self, error_message: str, context: str = "") -> bool:
-        """
-        Send error notification
-        """
-        try:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            message = f"""
-🚨 **FlowAI Bot Error Alert** 🚨
-
-❌ **Error:** {error_message}
-📍 **Context:** {context}
-⏰ **Time:** {timestamp}
-
-🔧 **Action Required:** Please check bot logs and restart if necessary.
-
-🎯 **FlowAI XAU Trading Bot v2.0**
-            """.strip()
-            
-            return self.send_message(message)
-            
-        except Exception as e:
-            logger.error(f"Error sending error notification: {e}")
-            return False
-    
-    def test_connection(self) -> bool:
-        """
-        Test Telegram bot connection
-        """
-        try:
-            test_message = f"""
-🧪 **FlowAI Bot Connection Test**
-
-✅ **Status:** Connection successful!
-⏰ **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-🎯 **FlowAI XAU Trading Bot v2.0**
-            """.strip()
-            
-            return self.send_message(test_message)
-            
-        except Exception as e:
-            logger.error(f"Telegram connection test failed: {e}")
-            return False
-
-# Create global instance
-telegram_bot = TelegramBot()
-
-# Convenience functions
-def send_telegram_message(message: str) -> bool:
-    """Convenience function to send Telegram message"""
-    return telegram_bot.send_message(message)
-
-def send_trading_signal(signal_type: str, symbol: str, price: float, 
-                       confidence: float, analysis: Dict[str, Any]) -> bool:
-    """Convenience function to send trading signal"""
-    return telegram_bot.send_signal(signal_type, symbol, price, confidence, analysis)
-
-def send_status_update(status: str, details: Dict[str, Any] = None) -> bool:
-    """Convenience function to send status update"""
-    return telegram_bot.send_status_update(status, details)
-
-def send_error_notification(error_message: str, context: str = "") -> bool:
-    """Convenience function to send error notification"""
-    return telegram_bot.send_error_notification(error_message, context)
+if __name__ == '__main__':
+    main()

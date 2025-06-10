@@ -1,708 +1,373 @@
-#!/usr/bin/env python3
-"""
-FlowAI Advanced Backtesting Engine v3.0
-Smart configuration with defaults and user customization
-Author: Behnam RJD
-"""
-
 import pandas as pd
 import numpy as np
-import json
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-import warnings
-warnings.filterwarnings('ignore')
-import sys
-import os
-import joblib
-from pathlib import Path
-import traceback
-
-# اضافه کردن path پروژه
-sys.path.append('.')
-sys.path.append('./flow_ai_core')
-
-try:
-    from . import data_handler, config
-except ImportError:
-    import data_handler
-    import config
+from .ai_signal_engine import AISignalEngine
+from .data_handler import get_processed_data
+import json
 
 logger = logging.getLogger(__name__)
 
-class SmartBacktestConfig:
-    """Smart configuration system with defaults and explanations"""
-    
+class BacktestEngine:
     def __init__(self):
-        self.defaults = {
-            'risk_management': {
-                'position_sizing': {
-                    'default': 'percentage',
-                    'value': 2.0,
-                    'description': 'روش تعیین سایز معامله',
-                    'explanation': '2% از سرمایه برای هر معامله (محافظه‌کارانه و ایمن)',
-                    'options': {
-                        'percentage': '2% از سرمایه (پیشنهادی)',
-                        'fixed_amount': 'مبلغ ثابت ($1000)',
-                        'kelly_criterion': 'Kelly Criterion (ریاضی پیشرفته)',
-                        'volatility_adjusted': 'تنظیم با نوسان بازار'
-                    }
-                },
-                'stop_loss': {
-                    'default': 'atr_multiple',
-                    'value': 2.0,
-                    'description': 'روش تعیین حد ضرر',
-                    'explanation': '2 برابر ATR (تنظیم خودکار با نوسان بازار)',
-                    'options': {
-                        'atr_multiple': '2×ATR (پیشنهادی - تطبیقی)',
-                        'fixed_percentage': '2% ثابت',
-                        'trailing_stop': 'Stop Loss دنبال‌کننده',
-                        'support_resistance': 'بر اساس سطوح فنی'
-                    }
-                },
-                'take_profit': {
-                    'default': 'risk_reward_ratio',
-                    'value': 3.0,
-                    'description': 'روش تعیین حد سود',
-                    'explanation': '3 برابر ریسک (نسبت ریسک به بازده 1:3)',
-                    'options': {
-                        'risk_reward_ratio': '1:3 ریسک به بازده (پیشنهادی)',
-                        'fixed_percentage': '6% ثابت',
-                        'atr_multiple': '4×ATR',
-                        'resistance_levels': 'بر اساس مقاومت‌ها'
-                    }
-                }
-            },
-            'market_conditions': {
-                'volatility_filter': {
-                    'default': 'all_conditions',
-                    'value': None,
-                    'description': 'فیلتر شرایط نوسان بازار',
-                    'explanation': 'همه شرایط (برای تست کامل استراتژی)',
-                    'options': {
-                        'all_conditions': 'همه شرایط (پیشنهادی)',
-                        'low_vol': 'فقط نوسان کم (محافظه‌کارانه)',
-                        'high_vol': 'فقط نوسان بالا (تهاجمی)',
-                        'medium_vol': 'نوسان متوسط (متعادل)'
-                    }
-                },
-                'trading_sessions': {
-                    'default': 'overlap_london_us',
-                    'value': '13:00-16:00',
-                    'description': 'ساعات فعال معاملاتی',
-                    'explanation': 'تداخل لندن-آمریکا (بیشترین نقدینگی و حرکت)',
-                    'options': {
-                        'overlap_london_us': '13:00-16:00 UTC (پیشنهادی)',
-                        'london': '08:00-16:00 UTC (جلسه لندن)',
-                        'us': '13:00-21:00 UTC (جلسه آمریکا)',
-                        'asian': '20:00-02:00 UTC (جلسه آسیا)',
-                        'all_sessions': '24 ساعته'
-                    }
-                },
-                'trend_filter': {
-                    'default': 'all_trends',
-                    'value': None,
-                    'description': 'فیلتر جهت روند بازار',
-                    'explanation': 'همه جهات روند (تست کامل)',
-                    'options': {
-                        'all_trends': 'همه جهات روند (پیشنهادی)',
-                        'uptrend_only': 'فقط روند صعودی',
-                        'downtrend_only': 'فقط روند نزولی',
-                        'sideways_only': 'فقط بازار خنثی'
-                    }
-                }
-            },
-            'ai_model': {
-                'confidence_threshold': {
-                    'default': 'moderate',
-                    'value': 0.7,
-                    'description': 'آستانه اطمینان مدل AI',
-                    'explanation': '70% اطمینان (تعادل بین کیفیت و تعداد سیگنال)',
-                    'options': {
-                        'moderate': '70% اطمینان (پیشنهادی)',
-                        'conservative': '85% اطمینان (کمتر اما دقیق‌تر)',
-                        'aggressive': '60% اطمینان (بیشتر اما ریسکی‌تر)',
-                        'custom': 'مقدار دلخواه'
-                    }
-                },
-                'signal_filter': {
-                    'default': 'all_signals',
-                    'value': None,
-                    'description': 'فیلتر نوع سیگنال‌ها',
-                    'explanation': 'همه سیگنال‌ها (BUY, SELL, STRONG_BUY, STRONG_SELL)',
-                    'options': {
-                        'all_signals': 'همه سیگنال‌ها (پیشنهادی)',
-                        'strong_only': 'فقط سیگنال‌های قوی',
-                        'buy_only': 'فقط سیگنال‌های خرید',
-                        'sell_only': 'فقط سیگنال‌های فروش'
-                    }
-                }
-            },
-            'transaction_costs': {
-                'commission': {
-                    'default': 'percentage_based',
-                    'value': 0.1,
-                    'description': 'کمیسیون معاملات',
-                    'explanation': '0.1% هر معامله (متوسط کارگزاری‌های معتبر)',
-                    'options': {
-                        'percentage_based': '0.1% هر معامله (پیشنهادی)',
-                        'fixed_per_trade': '$5 ثابت هر معامله',
-                        'zero_commission': 'بدون کمیسیون',
-                        'custom': 'مقدار دلخواه'
-                    }
-                },
-                'slippage': {
-                    'default': 'volatility_based',
-                    'value': 0.05,
-                    'description': 'لغزش قیمت هنگام اجرا',
-                    'explanation': 'تنظیم خودکار با نوسان (واقع‌گرایانه‌تر)',
-                    'options': {
-                        'volatility_based': 'تنظیم با نوسان (پیشنهادی)',
-                        'fixed_percentage': '0.05% ثابت',
-                        'volume_based': 'بر اساس حجم معامله',
-                        'zero_slippage': 'بدون لغزش (غیرواقعی)'
-                    }
-                }
-            },
-            'backtest_period': {
-                'duration': {
-                    'default': '3_months',
-                    'value': 90,
-                    'description': 'مدت زمان بک‌تست',
-                    'explanation': '3 ماه گذشته (تعادل بین داده کافی و relevance)',
-                    'options': {
-                        '1_month': '1 ماه گذشته',
-                        '3_months': '3 ماه گذشته (پیشنهادی)',
-                        '6_months': '6 ماه گذشته',
-                        '1_year': '1 سال گذشته',
-                        'custom': 'بازه دلخواه'
-                    }
-                },
-                'frequency': {
-                    'default': 'weekly',
-                    'value': 'weekly',
-                    'description': 'تکرار خودکار بک‌تست',
-                    'explanation': 'هفتگی (بررسی منظم عملکرد)',
-                    'options': {
-                        'daily': 'روزانه',
-                        'weekly': 'هفتگی (پیشنهادی)',
-                        'monthly': 'ماهانه',
-                        'manual': 'دستی'
-                    }
-                }
-            }
-        }
-    
-    def interactive_configuration(self):
-        """تنظیمات تعاملی با توضیحات و پیش‌فرض‌ها"""
+        self.ai_engine = AISignalEngine()
+        self.results = {}
         
-        print("🎯 FlowAI Smart Backtest Configuration")
-        print("=" * 60)
-        print("💡 برای استفاده از تنظیم پیشنهادی، Enter بزنید")
-        print("🔧 برای تغییر، شماره گزینه مورد نظر را وارد کنید")
-        print("=" * 60)
+    def run_backtest(self, 
+                    symbol: str = "GOLD",
+                    start_date: str = "2024-01-01",
+                    end_date: str = "2024-12-31",
+                    initial_balance: float = 10000,
+                    timeframe: str = "1h",
+                    risk_per_trade: float = 0.02) -> Dict:
+        """اجرای بک‌تست کامل"""
         
-        config = {}
-        
-        # Risk Management Section
-        config['risk_management'] = self._configure_section(
-            'risk_management', 
-            "🛡️ مدیریت ریسک"
-        )
-        
-        # Market Conditions Section  
-        config['market_conditions'] = self._configure_section(
-            'market_conditions',
-            "📊 شرایط بازار"
-        )
-        
-        # AI Model Section
-        config['ai_model'] = self._configure_section(
-            'ai_model',
-            "🤖 تنظیمات مدل هوش مصنوعی"
-        )
-        
-        # Transaction Costs Section
-        config['transaction_costs'] = self._configure_section(
-            'transaction_costs',
-            "💰 هزینه‌های معاملاتی"
-        )
-        
-        # Backtest Period Section
-        config['backtest_period'] = self._configure_section(
-            'backtest_period',
-            "📅 دوره بک‌تست"
-        )
-        
-        return config
-    
-    def _configure_section(self, section_name, section_title):
-        """تنظیم هر بخش با نمایش توضیحات"""
-        
-        print(f"\n{section_title}")
-        print("-" * 40)
-        
-        section_config = {}
-        section_defaults = self.defaults[section_name]
-        
-        for param_name, param_data in section_defaults.items():
-            section_config[param_name] = self._configure_parameter(
-                param_name, param_data
-            )
-        
-        return section_config
-    
-    def _configure_parameter(self, param_name, param_data):
-        """تنظیم هر پارامتر با نمایش گزینه‌ها"""
-        
-        print(f"\n📋 {param_data['description']}:")
-        print(f"💡 توضیح: {param_data['explanation']}")
-        print(f"⭐ پیشنهادی: {param_data['options'][param_data['default']]}")
-        
-        print("\n🔧 گزینه‌های موجود:")
-        options_list = list(param_data['options'].items())
-        
-        for i, (key, description) in enumerate(options_list, 1):
-            marker = "⭐" if key == param_data['default'] else "  "
-            print(f"{marker} {i}. {description}")
-        
-        while True:
-            user_input = input(f"\nانتخاب شما (Enter برای پیشنهادی): ").strip()
-            
-            # استفاده از پیش‌فرض
-            if not user_input:
-                selected_key = param_data['default']
-                selected_value = param_data['value']
-                print(f"✅ انتخاب شد: {param_data['options'][selected_key]}")
-                break
-            
-            # انتخاب کاربر
-            try:
-                choice_index = int(user_input) - 1
-                if 0 <= choice_index < len(options_list):
-                    selected_key = options_list[choice_index][0]
-                    
-                    # اگر custom انتخاب شد، مقدار بپرس
-                    if selected_key == 'custom':
-                        selected_value = self._get_custom_value(param_name, param_data)
-                    else:
-                        selected_value = param_data['value']
-                    
-                    print(f"✅ انتخاب شد: {param_data['options'][selected_key]}")
-                    break
-                else:
-                    print("❌ شماره نامعتبر! دوباره تلاش کنید.")
-            except ValueError:
-                print("❌ لطفاً شماره معتبر وارد کنید!")
-        
-        return {
-            'method': selected_key,
-            'value': selected_value,
-            'description': param_data['options'][selected_key]
-        }
-    
-    def _get_custom_value(self, param_name, param_data):
-        """دریافت مقدار سفارشی از کاربر"""
-        
-        while True:
-            try:
-                if 'percentage' in param_name or 'threshold' in param_name:
-                    value = float(input("مقدار درصد (0-100): ")) / 100
-                    if 0 <= value <= 1:
-                        return value
-                    else:
-                        print("❌ مقدار باید بین 0 تا 100 باشد!")
-                
-                elif 'amount' in param_name:
-                    value = float(input("مبلغ ($): "))
-                    if value > 0:
-                        return value
-                    else:
-                        print("❌ مبلغ باید مثبت باشد!")
-                
-                elif 'duration' in param_name:
-                    value = int(input("تعداد روز: "))
-                    if value > 0:
-                        return value
-                    else:
-                        print("❌ تعداد روز باید مثبت باشد!")
-                
-                else:
-                    value = float(input("مقدار: "))
-                    return value
-                    
-            except ValueError:
-                print("❌ لطفاً عدد معتبر وارد کنید!")
-    
-    def display_configuration_summary(self, config):
-        """نمایش خلاصه تنظیمات انتخاب شده"""
-        
-        print("\n" + "=" * 60)
-        print("📋 خلاصه تنظیمات بک‌تست FlowAI")
-        print("=" * 60)
-        
-        print("\n🛡️ مدیریت ریسک:")
-        risk = config['risk_management']
-        print(f"  • سایز معامله: {risk['position_sizing']['description']}")
-        print(f"  • حد ضرر: {risk['stop_loss']['description']}")
-        print(f"  • حد سود: {risk['take_profit']['description']}")
-        
-        print("\n📊 شرایط بازار:")
-        market = config['market_conditions']
-        print(f"  • فیلتر نوسان: {market['volatility_filter']['description']}")
-        print(f"  • ساعات معاملاتی: {market['trading_sessions']['description']}")
-        print(f"  • فیلتر روند: {market['trend_filter']['description']}")
-        
-        print("\n🤖 مدل هوش مصنوعی:")
-        ai = config['ai_model']
-        print(f"  • آستانه اطمینان: {ai['confidence_threshold']['description']}")
-        print(f"  • فیلتر سیگنال: {ai['signal_filter']['description']}")
-        
-        print("\n💰 هزینه‌های معاملاتی:")
-        costs = config['transaction_costs']
-        print(f"  • کمیسیون: {costs['commission']['description']}")
-        print(f"  • لغزش: {costs['slippage']['description']}")
-        
-        print("\n📅 دوره بک‌تست:")
-        period = config['backtest_period']
-        print(f"  • مدت زمان: {period['duration']['description']}")
-        print(f"  • تکرار: {period['frequency']['description']}")
-        
-        print("\n" + "=" * 60)
-        
-        confirm = input("آیا این تنظیمات را تأیید می‌کنید؟ (y/N): ")
-        return confirm.lower() in ['y', 'yes', 'بله']
-    
-    def save_configuration(self, config, filename='advanced_backtest_config.json'):
-        """ذخیره تنظیمات در فایل"""
         try:
-            config['created_at'] = datetime.now().isoformat()
-            config['version'] = '3.0'
+            logger.info(f"Starting backtest: {symbol} from {start_date} to {end_date}")
             
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
+            # تولید داده‌های شبیه‌سازی شده
+            data = self._generate_historical_data(start_date, end_date, timeframe)
             
-            logger.info(f"Configuration saved to {filename}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save configuration: {e}")
-            return False
-    
-    def load_configuration(self, filename='advanced_backtest_config.json'):
-        """بارگذاری تنظیمات از فایل"""
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+            if data.empty:
+                raise ValueError("No historical data available")
             
-            logger.info(f"Configuration loaded from {filename}")
-            return config
-        except Exception as e:
-            logger.error(f"Failed to load configuration: {e}")
-            return None
-
-class Portfolio:
-    """Portfolio management for backtesting"""
-    
-    def __init__(self, initial_capital=10000):
-        self.initial_capital = initial_capital
-        self.cash = initial_capital
-        self.positions = {}
-        self.trades = []
-        self.equity_history = []
-        self.current_value = initial_capital
-        
-    def calculate_position_size(self, signal, price, config):
-        """Calculate position size based on configuration"""
-        risk_config = config['risk_management']['position_sizing']
-        
-        if risk_config['method'] == 'percentage':
-            return self.current_value * (risk_config['value'] / 100)
-        elif risk_config['method'] == 'fixed_amount':
-            return risk_config['value']
-        elif risk_config['method'] == 'volatility_adjusted':
-            # Simple volatility adjustment
-            return self.current_value * 0.02  # 2% default
-        else:
-            return self.current_value * 0.02
-    
-    def execute_trade(self, signal, price, timestamp, config, market_data=None):
-        """Execute trade with realistic costs"""
-        if signal == 'HOLD':
-            return
-        
-        position_value = self.calculate_position_size(signal, price, config)
-        
-        # Calculate commission
-        commission_config = config['transaction_costs']['commission']
-        if commission_config['method'] == 'percentage_based':
-            commission = position_value * (commission_config['value'] / 100)
-        else:
-            commission = commission_config['value']
-        
-        # Calculate slippage
-        slippage_config = config['transaction_costs']['slippage']
-        if slippage_config['method'] == 'fixed_percentage':
-            slippage = price * (slippage_config['value'] / 100)
-        else:
-            slippage = price * 0.0005  # 0.05% default
-        
-        # Adjust price for slippage
-        if signal in ['BUY', 'STRONG_BUY']:
-            execution_price = price + slippage
-            shares = (position_value - commission) / execution_price
+            # اجرای بک‌تست
+            trades = []
+            balance = initial_balance
+            position = None
+            equity_curve = []
             
-            if self.cash >= position_value:
-                self.cash -= position_value
-                self.positions[timestamp] = {
-                    'type': 'LONG',
-                    'shares': shares,
-                    'entry_price': execution_price,
-                    'entry_time': timestamp,
-                    'signal_strength': signal
-                }
+            for i in range(50, len(data)):  # شروع از ایندکس 50 برای اندیکاتورها
+                current_data = data.iloc[:i+1]
+                current_price = data.iloc[i]['Close']
+                current_time = data.index[i]
                 
-                self.trades.append({
-                    'timestamp': timestamp,
-                    'action': 'BUY',
-                    'price': execution_price,
-                    'shares': shares,
-                    'commission': commission,
-                    'signal': signal
+                # محاسبه اندیکاتورها
+                indicators = self.ai_engine.calculate_technical_indicators(current_data)
+                
+                if not indicators:
+                    continue
+                
+                # تولید سیگنال
+                signal = self.ai_engine._analyze_market_conditions(indicators, force_analysis=True)
+                
+                # مدیریت موقعیت
+                if position is None and signal and signal['confidence'] >= 0.6:
+                    # ورود به معامله
+                    if signal['action'] in ['BUY', 'SELL']:
+                        position_size = (balance * risk_per_trade) / abs(current_price - signal['stop_loss'])
+                        position_size = min(position_size, balance * 0.1)  # حداکثر 10% سرمایه
+                        
+                        position = {
+                            'action': signal['action'],
+                            'entry_price': current_price,
+                            'entry_time': current_time,
+                            'size': position_size,
+                            'stop_loss': signal['stop_loss'],
+                            'target_price': signal['target_price'],
+                            'confidence': signal['confidence']
+                        }
+                        
+                        logger.debug(f"Opened {signal['action']} position at {current_price}")
+                
+                elif position is not None:
+                    # بررسی خروج از معامله
+                    exit_triggered = False
+                    exit_reason = ""
+                    exit_price = current_price
+                    
+                    if position['action'] == 'BUY':
+                        if current_price >= position['target_price']:
+                            exit_triggered = True
+                            exit_reason = "Target reached"
+                            exit_price = position['target_price']
+                        elif current_price <= position['stop_loss']:
+                            exit_triggered = True
+                            exit_reason = "Stop loss"
+                            exit_price = position['stop_loss']
+                    
+                    elif position['action'] == 'SELL':
+                        if current_price <= position['target_price']:
+                            exit_triggered = True
+                            exit_reason = "Target reached"
+                            exit_price = position['target_price']
+                        elif current_price >= position['stop_loss']:
+                            exit_triggered = True
+                            exit_reason = "Stop loss"
+                            exit_price = position['stop_loss']
+                    
+                    if exit_triggered:
+                        # محاسبه سود/ضرر
+                        if position['action'] == 'BUY':
+                            pnl = (exit_price - position['entry_price']) * position['size']
+                        else:
+                            pnl = (position['entry_price'] - exit_price) * position['size']
+                        
+                        balance += pnl
+                        
+                        trade = {
+                            'entry_time': position['entry_time'],
+                            'exit_time': current_time,
+                            'action': position['action'],
+                            'entry_price': position['entry_price'],
+                            'exit_price': exit_price,
+                            'size': position['size'],
+                            'pnl': pnl,
+                            'pnl_percent': (pnl / (position['entry_price'] * position['size'])) * 100,
+                            'exit_reason': exit_reason,
+                            'confidence': position['confidence']
+                        }
+                        
+                        trades.append(trade)
+                        position = None
+                        
+                        logger.debug(f"Closed position: PnL = {pnl:.2f}")
+                
+                # ثبت equity curve
+                equity_curve.append({
+                    'time': current_time,
+                    'balance': balance,
+                    'price': current_price
                 })
-        
-        elif signal in ['SELL', 'STRONG_SELL']:
-            # Close existing positions
-            for pos_time, position in list(self.positions.items()):
-                if position['type'] == 'LONG':
-                    execution_price = price - slippage
-                    proceeds = position['shares'] * execution_price - commission
-                    self.cash += proceeds
-                    
-                    # Calculate P&L
-                    pnl = proceeds - (position['shares'] * position['entry_price'])
-                    
-                    self.trades.append({
-                        'timestamp': timestamp,
-                        'action': 'SELL',
-                        'price': execution_price,
-                        'shares': position['shares'],
-                        'commission': commission,
-                        'pnl': pnl,
-                        'signal': signal,
-                        'entry_time': position['entry_time'],
-                        'entry_price': position['entry_price']
-                    })
-                    
-                    del self.positions[pos_time]
-    
-    def update_portfolio_value(self, current_price, timestamp):
-        """Update current portfolio value"""
-        portfolio_value = self.cash
-        
-        for position in self.positions.values():
-            if position['type'] == 'LONG':
-                portfolio_value += position['shares'] * current_price
-        
-        self.current_value = portfolio_value
-        self.equity_history.append({
-            'timestamp': timestamp,
-            'value': portfolio_value,
-            'cash': self.cash,
-            'positions_value': portfolio_value - self.cash
-        })
-
-class PerformanceAnalyzer:
-    """Advanced performance analysis"""
-    
-    def __init__(self):
-        self.metrics = {}
-    
-    def calculate_metrics(self, portfolio, trades):
-        """Calculate comprehensive performance metrics"""
-        if not trades:
-            return {'error': 'No trades to analyze'}
-        
-        # Basic metrics
-        total_trades = len([t for t in trades if 'pnl' in t])
-        winning_trades = len([t for t in trades if t.get('pnl', 0) > 0])
-        losing_trades = len([t for t in trades if t.get('pnl', 0) < 0])
-        
-        if total_trades == 0:
-            return {'error': 'No completed trades'}
-        
-        win_rate = (winning_trades / total_trades) * 100
-        
-        # P&L analysis
-        total_pnl = sum([t.get('pnl', 0) for t in trades])
-        avg_win = np.mean([t['pnl'] for t in trades if t.get('pnl', 0) > 0]) if winning_trades > 0 else 0
-        avg_loss = np.mean([t['pnl'] for t in trades if t.get('pnl', 0) < 0]) if losing_trades > 0 else 0
-        
-        # Returns calculation
-        initial_value = portfolio.initial_capital
-        final_value = portfolio.current_value
-        total_return = ((final_value - initial_value) / initial_value) * 100
-        
-        # Drawdown calculation
-        equity_values = [e['value'] for e in portfolio.equity_history]
-        if len(equity_values) > 1:
-            peak = equity_values[0]
-            max_drawdown = 0
             
-            for value in equity_values:
-                if value > peak:
-                    peak = value
-                drawdown = ((peak - value) / peak) * 100
-                max_drawdown = max(max_drawdown, drawdown)
-        else:
-            max_drawdown = 0
+            # محاسبه آمار نهایی
+            results = self._calculate_statistics(trades, initial_balance, balance, equity_curve)
+            
+            self.results = {
+                'parameters': {
+                    'symbol': symbol,
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'initial_balance': initial_balance,
+                    'timeframe': timeframe,
+                    'risk_per_trade': risk_per_trade
+                },
+                'trades': trades,
+                'statistics': results,
+                'equity_curve': equity_curve,
+                'timestamp': datetime.now()
+            }
+            
+            logger.info(f"Backtest completed: {len(trades)} trades, Final balance: {balance:.2f}")
+            return self.results
+            
+        except Exception as e:
+            logger.error(f"Backtest error: {e}")
+            raise
+    
+    def _generate_historical_data(self, start_date: str, end_date: str, timeframe: str) -> pd.DataFrame:
+        """تولید داده‌های تاریخی شبیه‌سازی شده"""
         
-        # Sharpe ratio (simplified)
-        if len(equity_values) > 1:
-            returns = np.diff(equity_values) / equity_values[:-1]
-            sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(252) if np.std(returns) > 0 else 0
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        
+        # تولید تاریخ‌ها
+        if timeframe == "1h":
+            freq = "1H"
+        elif timeframe == "4h":
+            freq = "4H"
+        elif timeframe == "1d":
+            freq = "1D"
+        else:
+            freq = "1H"
+        
+        dates = pd.date_range(start=start, end=end, freq=freq)
+        
+        # تولید قیمت‌های شبیه‌سازی شده (Random Walk با Trend)
+        np.random.seed(42)  # برای تکرارپذیری
+        
+        base_price = 3300  # قیمت پایه طلا
+        returns = np.random.normal(0.0001, 0.02, len(dates))  # بازده‌های تصادفی
+        
+        # اضافه کردن trend
+        trend = np.linspace(0, 0.1, len(dates))
+        returns += trend / len(dates)
+        
+        prices = [base_price]
+        for ret in returns[1:]:
+            new_price = prices[-1] * (1 + ret)
+            prices.append(new_price)
+        
+        # تولید OHLC
+        data = []
+        for i, price in enumerate(prices):
+            volatility = np.random.uniform(0.005, 0.02)
+            
+            open_price = price * (1 + np.random.uniform(-volatility/2, volatility/2))
+            close_price = price * (1 + np.random.uniform(-volatility/2, volatility/2))
+            high_price = max(open_price, close_price) * (1 + np.random.uniform(0, volatility))
+            low_price = min(open_price, close_price) * (1 - np.random.uniform(0, volatility))
+            volume = np.random.randint(1000, 10000)
+            
+            data.append({
+                'Open': open_price,
+                'High': high_price,
+                'Low': low_price,
+                'Close': close_price,
+                'Volume': volume
+            })
+        
+        df = pd.DataFrame(data, index=dates)
+        return df
+    
+    def _calculate_statistics(self, trades: List[Dict], initial_balance: float, 
+                            final_balance: float, equity_curve: List[Dict]) -> Dict:
+        """محاسبه آمار عملکرد"""
+        
+        if not trades:
+            return {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'total_pnl': 0,
+                'total_return': 0,
+                'max_drawdown': 0,
+                'profit_factor': 0,
+                'sharpe_ratio': 0,
+                'avg_win': 0,
+                'avg_loss': 0,
+                'largest_win': 0,
+                'largest_loss': 0
+            }
+        
+        # آمار پایه
+        total_trades = len(trades)
+        winning_trades = len([t for t in trades if t['pnl'] > 0])
+        losing_trades = len([t for t in trades if t['pnl'] < 0])
+        win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+        
+        # سود/ضرر
+        total_pnl = sum(t['pnl'] for t in trades)
+        total_return = ((final_balance - initial_balance) / initial_balance) * 100
+        
+        # محاسبه drawdown
+        balances = [eq['balance'] for eq in equity_curve]
+        peak = balances[0]
+        max_drawdown = 0
+        
+        for balance in balances:
+            if balance > peak:
+                peak = balance
+            drawdown = ((peak - balance) / peak) * 100
+            max_drawdown = max(max_drawdown, drawdown)
+        
+        # Profit Factor
+        gross_profit = sum(t['pnl'] for t in trades if t['pnl'] > 0)
+        gross_loss = abs(sum(t['pnl'] for t in trades if t['pnl'] < 0))
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0
+        
+        # Sharpe Ratio (ساده شده)
+        returns = [t['pnl_percent'] for t in trades]
+        if len(returns) > 1:
+            avg_return = np.mean(returns)
+            std_return = np.std(returns)
+            sharpe_ratio = avg_return / std_return if std_return > 0 else 0
         else:
             sharpe_ratio = 0
+        
+        # آمار معاملات
+        winning_pnls = [t['pnl'] for t in trades if t['pnl'] > 0]
+        losing_pnls = [t['pnl'] for t in trades if t['pnl'] < 0]
+        
+        avg_win = np.mean(winning_pnls) if winning_pnls else 0
+        avg_loss = np.mean(losing_pnls) if losing_pnls else 0
+        largest_win = max(winning_pnls) if winning_pnls else 0
+        largest_loss = min(losing_pnls) if losing_pnls else 0
         
         return {
             'total_trades': total_trades,
             'winning_trades': winning_trades,
             'losing_trades': losing_trades,
-            'win_rate': round(win_rate, 2),
-            'total_pnl': round(total_pnl, 2),
-            'total_return': round(total_return, 2),
-            'avg_win': round(avg_win, 2),
-            'avg_loss': round(avg_loss, 2),
-            'profit_factor': round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else 0,
-            'max_drawdown': round(max_drawdown, 2),
-            'sharpe_ratio': round(sharpe_ratio, 2),
-            'initial_capital': initial_value,
-            'final_value': round(final_value, 2)
-        }
-
-class FlowAIBacktester:
-    """Main backtesting engine"""
-    
-    def __init__(self, config):
-        self.config = config
-        self.portfolio = Portfolio(10000)  # Default $10k
-        self.performance = PerformanceAnalyzer()
-        
-    def run_backtest(self, data, strategy_signals):
-        """Run complete backtest"""
-        logger.info("🚀 Starting FlowAI Backtest...")
-        
-        if data.empty or strategy_signals.empty:
-            return {'error': 'No data or signals provided'}
-        
-        # Align data and signals
-        aligned_data = data.join(strategy_signals, how='inner')
-        
-        if aligned_data.empty:
-            return {'error': 'No aligned data found'}
-        
-        logger.info(f"📊 Processing {len(aligned_data)} data points...")
-        
-        for timestamp, row in aligned_data.iterrows():
-            # Get AI signal
-            signal = row.get('signal', 'HOLD')
-            price = row['Close']
-            
-            # Apply filters
-            if not self._apply_filters(row, timestamp):
-                continue
-            
-            # Execute trade
-            self.portfolio.execute_trade(
-                signal, price, timestamp, self.config, row
-            )
-            
-            # Update portfolio value
-            self.portfolio.update_portfolio_value(price, timestamp)
-        
-        # Calculate final metrics
-        metrics = self.performance.calculate_metrics(
-            self.portfolio, self.portfolio.trades
-        )
-        
-        logger.info("✅ Backtest completed!")
-        return {
-            'metrics': metrics,
-            'trades': self.portfolio.trades,
-            'equity_curve': self.portfolio.equity_history,
-            'config': self.config
+            'win_rate': win_rate,
+            'total_pnl': total_pnl,
+            'total_return': total_return,
+            'max_drawdown': max_drawdown,
+            'profit_factor': profit_factor,
+            'sharpe_ratio': sharpe_ratio,
+            'avg_win': avg_win,
+            'avg_loss': avg_loss,
+            'largest_win': largest_win,
+            'largest_loss': largest_loss,
+            'gross_profit': gross_profit,
+            'gross_loss': gross_loss
         }
     
-    def _apply_filters(self, row, timestamp):
-        """Apply market condition filters"""
+    def export_results(self, format: str = "json") -> str:
+        """صادرات نتایج"""
+        if not self.results:
+            raise ValueError("No backtest results available")
         
-        # Volatility filter
-        vol_filter = self.config['market_conditions']['volatility_filter']
-        if vol_filter['method'] != 'all_conditions':
-            # Simple volatility check (can be enhanced)
-            volatility = row.get('volatility_20', 0)
-            if vol_filter['method'] == 'low_vol' and volatility > 0.02:
-                return False
-            elif vol_filter['method'] == 'high_vol' and volatility < 0.03:
-                return False
+        if format == "json":
+            # تبدیل datetime به string برای JSON
+            results_copy = self.results.copy()
+            results_copy['timestamp'] = results_copy['timestamp'].isoformat()
+            
+            for trade in results_copy['trades']:
+                trade['entry_time'] = trade['entry_time'].isoformat()
+                trade['exit_time'] = trade['exit_time'].isoformat()
+            
+            for eq in results_copy['equity_curve']:
+                eq['time'] = eq['time'].isoformat()
+            
+            return json.dumps(results_copy, indent=2, ensure_ascii=False)
         
-        # Trading session filter
-        session_filter = self.config['market_conditions']['trading_sessions']
-        if session_filter['method'] != 'all_sessions':
-            hour = timestamp.hour
-            if session_filter['method'] == 'overlap_london_us':
-                if not (13 <= hour <= 16):
-                    return False
-            elif session_filter['method'] == 'london':
-                if not (8 <= hour <= 16):
-                    return False
-            elif session_filter['method'] == 'us':
-                if not (13 <= hour <= 21):
-                    return False
-        
-        return True
+        elif format == "summary":
+            stats = self.results['statistics']
+            params = self.results['parameters']
+            
+            summary = f"""
+📊 **گزارش بک‌تست FlowAI**
 
-def load_ai_model_and_predict(data):
-    """Load AI model and generate predictions"""
-    try:
-        import joblib
+⚙️ **پارامترها:**
+🔹 نماد: {params['symbol']}
+🔹 تاریخ: {params['start_date']} تا {params['end_date']}
+🔹 سرمایه اولیه: ${params['initial_balance']:,.0f}
+🔹 تایم فریم: {params['timeframe']}
+🔹 ریسک هر معامله: {params['risk_per_trade']:.1%}
+
+📈 **نتایج کلی:**
+🔹 تعداد معاملات: {stats['total_trades']}
+🔹 معاملات سودآور: {stats['winning_trades']} ({stats['win_rate']:.1f}%)
+🔹 معاملات ضررده: {stats['losing_trades']}
+🔹 سود کل: ${stats['total_pnl']:,.2f} ({stats['total_return']:+.1f}%)
+
+📊 **آمار عملکرد:**
+🔹 حداکثر ضرر: {stats['max_drawdown']:.1f}%
+🔹 ضریب سود: {stats['profit_factor']:.2f}
+🔹 نسبت شارپ: {stats['sharpe_ratio']:.2f}
+🔹 میانگین سود: ${stats['avg_win']:,.2f}
+🔹 میانگین ضرر: ${stats['avg_loss']:,.2f}
+🔹 بزرگترین سود: ${stats['largest_win']:,.2f}
+🔹 بزرگترین ضرر: ${stats['largest_loss']:,.2f}
+
+⏰ **تاریخ گزارش:** {self.results['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}
+"""
+            return summary
         
-        # Load model
-        model = joblib.load('model.pkl')
-        features = joblib.load('model_features.pkl')
-        
-        # Prepare features (simplified)
-        feature_data = data[features].fillna(0)
-        
-        # Generate predictions
-        predictions = model.predict(feature_data)
-        confidence = model.predict_proba(feature_data).max(axis=1)
-        
-        # Convert to signals
-        signal_map = {0: 'STRONG_SELL', 1: 'SELL', 2: 'HOLD', 3: 'BUY', 4: 'STRONG_BUY'}
-        signals = [signal_map.get(p, 'HOLD') for p in predictions]
-        
-        return pd.DataFrame({
-            'signal': signals,
-            'confidence': confidence
-        }, index=data.index)
-        
-    except Exception as e:
-        logger.error(f"Error loading AI model: {e}")
-        # Fallback to random signals for testing
-        signals = np.random.choice(['BUY', 'SELL', 'HOLD'], size=len(data))
-        return pd.DataFrame({
-            'signal': signals,
-            'confidence': np.random.uniform(0.6, 0.9, size=len(data))
-        }, index=data.index)
-    
-if __name__ == "__main__":
-    # تست سیستم تنظیمات
-    config_wizard = SmartBacktestConfig()
-    user_config = config_wizard.interactive_configuration()
-    
-    if config_wizard.display_configuration_summary(user_config):
-        config_wizard.save_configuration(user_config)
-        print("\n✅ تنظیمات با موفقیت ذخیره شد!")
-    else:
-        print("\n❌ تنظیمات لغو شد")
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+
+# Global instance
+backtest_engine = BacktestEngine()
+
+def run_backtest_analysis(symbol: str = "GOLD", 
+                         start_date: str = "2024-01-01",
+                         end_date: str = "2024-12-31",
+                         initial_balance: float = 10000,
+                         timeframe: str = "1h",
+                         risk_per_trade: float = 0.02) -> Dict:
+    """تابع global برای اجرای بک‌تست"""
+    return backtest_engine.run_backtest(
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        initial_balance=initial_balance,
+        timeframe=timeframe,
+        risk_per_trade=risk_per_trade
+    )
+
+def get_backtest_summary() -> str:
+    """دریافت خلاصه آخرین بک‌تست"""
+    return backtest_engine.export_results("summary")
