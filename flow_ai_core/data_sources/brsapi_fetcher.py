@@ -18,7 +18,7 @@ class BrsAPIFetcher:
         self.last_minute = datetime.now().minute
         self.last_reset = datetime.now().date()
         self.cache = {}
-        self.cache_duration = 10  # seconds
+        self.cache_duration = 10
 
     def _reset_counters_if_needed(self):
         now = datetime.now()
@@ -60,53 +60,93 @@ class BrsAPIFetcher:
             return None
         try:
             params['key'] = self.api_key
-            logger.debug(f"Making request: {params}")
             response = requests.get(self.base_url, params=params, headers=self.headers, timeout=10)
             self.daily_calls += 1
             self.minute_calls += 1
             if response.status_code == 200:
                 data = response.json()
                 self.cache[cache_key] = {'data': data, 'timestamp': datetime.now()}
-                logger.debug(f"API Response: {data}")
                 return data
             else:
                 logger.error(f"BrsAPI HTTP error: {response.status_code}")
-                logger.error(f"Response: {response.text}")
                 return None
         except Exception as e:
             logger.error(f"BrsAPI request failed: {e}")
             return None
 
     def get_real_time_gold(self):
+        """دریافت قیمت real-time طلا با ساختار JSON جدید"""
         params = {'section': 'gold'}
         data = self._make_request(params)
-        logger.debug(f"Raw API Response: {data}")
-        if not data or not isinstance(data, list):
+        
+        if not data or not isinstance(data, dict):
             logger.error("Invalid or empty data received from BrsAPI")
             return None
-        for item in data:
-            name = item.get('name', '').lower()
-            if 'طلا' in name or 'gold' in name:
+        
+        # بررسی ساختار جدید JSON
+        if not data.get('successful'):
+            logger.error(f"BrsAPI returned error: {data.get('message_error')}")
+            return None
+        
+        # استخراج قیمت انس طلا (XAUUSD)
+        gold_data = data.get('gold', {})
+        ounce_list = gold_data.get('ounce', [])
+        
+        if ounce_list and len(ounce_list) > 0:
+            ounce = ounce_list[0]  # اولین آیتم انس طلا
+            
+            try:
+                price_usd = float(ounce.get('price', 0))
+                
+                result = {
+                    'price': price_usd,
+                    'price_rial': price_usd * 70000,  # تبدیل تقریبی به ریال
+                    'change': float(ounce.get('change_value', 0)),
+                    'change_percent': float(ounce.get('change_percent', 0)),
+                    'timestamp': datetime.now(),
+                    'source': 'BrsAPI_Pro',
+                    'symbol': ounce.get('symbol', 'XAUUSD'),
+                    'name': ounce.get('name', 'انس طلا'),
+                    'date': ounce.get('date', ''),
+                    'time': ounce.get('time', ''),
+                    'unit': ounce.get('unit', 'دلار')
+                }
+                
+                logger.info(f"✅ BrsAPI Gold: ${price_usd:.2f} ({ounce.get('change_percent', 0):.2f}%)")
+                return result
+                
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error processing gold ounce data: {e}")
+        
+        # اگر انس طلا موجود نبود، از طلای 18 عیار استفاده کن
+        type_list = gold_data.get('type', [])
+        for item in type_list:
+            if 'IR_GOLD_18K' in item.get('symbol', ''):
                 try:
-                    price_str = str(item.get('price', '0')).replace(',', '')
-                    price_rial = float(price_str)
-                    price_usd = price_rial / 70000
-                    change_val = str(item.get('change_value', '0')).replace(',', '')
-                    return {
+                    price_rial = float(item.get('price', 0))
+                    price_usd = price_rial / 70000  # تبدیل به دلار
+                    
+                    result = {
                         'price': price_usd,
                         'price_rial': price_rial,
-                        'change': float(change_val),
-                        'change_percent': float(item.get('change_percent', '0')),
+                        'change': float(item.get('change_value', 0)),
+                        'change_percent': float(item.get('change_percent', 0)),
                         'timestamp': datetime.now(),
-                        'source': 'BrsAPI_Pro',
-                        'symbol': item.get('name', 'Gold'),
+                        'source': 'BrsAPI_Pro_18K',
+                        'symbol': item.get('symbol', 'IR_GOLD_18K'),
+                        'name': item.get('name', 'طلای 18 عیار'),
                         'date': item.get('date', ''),
-                        'time': item.get('time', '')
+                        'time': item.get('time', ''),
+                        'unit': 'USD (converted)'
                     }
-                except Exception as e:
-                    logger.error(f"Error processing gold data: {e}")
-                    continue
-        logger.warning("No gold data found in response")
+                    
+                    logger.info(f"✅ BrsAPI 18K Gold: ${price_usd:.2f}")
+                    return result
+                    
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Error processing 18K gold data: {e}")
+        
+        logger.warning("No usable gold data found in BrsAPI response")
         return None
 
 # Global instance
