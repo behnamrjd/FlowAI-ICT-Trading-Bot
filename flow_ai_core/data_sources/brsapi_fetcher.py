@@ -18,7 +18,7 @@ class BrsAPIFetcher:
         self.last_minute = datetime.now().minute
         self.last_reset = datetime.now().date()
         self.cache = {}
-        self.cache_duration = 10
+        self.cache_duration = 10  # seconds
 
     def _reset_counters_if_needed(self):
         now = datetime.now()
@@ -80,6 +80,7 @@ class BrsAPIFetcher:
     def get_real_time_gold(self):
         params = {'section': 'gold'}
         data = self._make_request(params)
+        logger.debug(f"Raw API Response: {data}")
         if not data or not isinstance(data, list):
             logger.error("Invalid or empty data received from BrsAPI")
             return None
@@ -87,13 +88,14 @@ class BrsAPIFetcher:
             name = item.get('name', '').lower()
             if 'طلا' in name or 'gold' in name:
                 try:
-                    price_str = item.get('price', '0').replace(',', '')
+                    price_str = str(item.get('price', '0')).replace(',', '')
                     price_rial = float(price_str)
-                    price_usd = price_rial / 70000  # تبدیل تقریبی به دلار
+                    price_usd = price_rial / 70000
+                    change_val = str(item.get('change_value', '0')).replace(',', '')
                     return {
                         'price': price_usd,
                         'price_rial': price_rial,
-                        'change': float(item.get('change_value', '0').replace(',', '')),
+                        'change': float(change_val),
                         'change_percent': float(item.get('change_percent', '0')),
                         'timestamp': datetime.now(),
                         'source': 'BrsAPI_Pro',
