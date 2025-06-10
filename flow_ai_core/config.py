@@ -174,3 +174,7 @@ AI_STRONG_SELL_THRESHOLD = get_env_var("AI_STRONG_SELL_THRESHOLD", -0.008, var_t
 # Model Configuration v3.0
 MODEL_VERSION = get_env_var("MODEL_VERSION", "3.0")
 MODEL_METADATA_PATH = get_env_var("MODEL_METADATA_PATH", "model_metadata.pkl")
+
+# ===== TIMEZONE CONFIGURATION =====
+TIMEZONE = get_env_var('TIMEZONE', 'Asia/Tehran')
+UTC_OFFSET = '+0330'
