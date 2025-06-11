@@ -618,6 +618,14 @@ quick_install() {
         log_error "Directory Change" "Cannot access $INSTALL_DIR" "cd" "1"
         return 1
     }
+
+    print_step "Switching to branch 'feature/standardize-ta-library'..."
+    if git checkout feature/standardize-ta-library && git pull origin feature/standardize-ta-library; then
+        print_success "Successfully checked out and updated branch 'feature/standardize-ta-library'."
+    else
+        print_warning "Failed to checkout or update branch 'feature/standardize-ta-library'. Will attempt to use current branch."
+        log_error "Git Checkout" "Failed to checkout feature/standardize-ta-library" "git checkout feature/standardize-ta-library" "$?"
+    fi
     
     # Remove existing venv if corrupted
     if [ -d "venv" ]; then
