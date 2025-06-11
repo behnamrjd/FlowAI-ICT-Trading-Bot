@@ -720,12 +720,6 @@ EOF
     ((current++))
     print_step_simple "${steps[8]}" $current $total "running"
     
-    # Fix import talib to import ta in data_handler.py
-    if [ -f "flow_ai_core/data_handler.py" ]; then
-        sed -i 's/import talib/import ta/g' flow_ai_core/data_handler.py
-        sed -i 's/talib\./ta.trend./g' flow_ai_core/data_handler.py
-    fi
-    
     # Ensure telegram_bot.py is in root directory
     if [ -f "flow_ai_core/telegram_bot.py" ] && [ ! -f "telegram_bot.py" ]; then
         cp flow_ai_core/telegram_bot.py telegram_bot.py
