@@ -19,7 +19,7 @@ TA-Lib~=0.4.24 # Requires TA-Lib C library to be installed separately
 schedule~=1.1.0 # For scheduling tasks
 
 # Date & Time Handling
-# jdatetime~=4.1.0 # Compatible release with 4.1
+jdatetime~=4.1.0 # Compatible release with 4.1
 # pytz~=2022.1 # Compatible release with 2022.1
 
 # Async Support

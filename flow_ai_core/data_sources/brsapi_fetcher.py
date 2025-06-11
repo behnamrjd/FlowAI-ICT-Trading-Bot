@@ -1,8 +1,10 @@
 import requests
 import logging
 from datetime import datetime
-from typing import Optional # Added
-import pandas as pd # Added
+from typing import Optional, Dict, Any # Added Dict, Any
+import pandas as pd
+import numpy as np # Added
+import jdatetime # Added
 from ..config import USD_IRR_EXCHANGE_RATE
 
 logger = logging.getLogger(__name__)
@@ -152,77 +154,85 @@ class BrsAPIFetcher:
         logger.warning("No usable gold data found in BrsAPI response")
         return None
 
-    def get_historical_gold_ohlcv(self, symbol: str, timeframe: str, count: int = 200) -> Optional[pd.DataFrame]:
+    def get_daily_historical_gold(self, symbol: str, date_start: Optional[str] = None, date_end: Optional[str] = None) -> Optional[pd.DataFrame]:
         """
-        Attempts to fetch historical OHLCV data for gold.
-        NOTE: The exact API parameters for historical data are unknown.
-        This method is a template and may require adjustment based on BrsAPI documentation.
+        Fetches daily historical OHLC data for the given symbol (e.g., XAUUSD) from BrsAPI.
+        Dates are expected in Shamsi 'YYYY-MM-DD' format for the API query.
+        Returns a pandas DataFrame with Gregorian Timestamps as index and OHLCV columns.
+        Volume data is not provided by this API endpoint and will be set to 0.
         """
-        params = {
+        params: Dict[str, Any] = {
+            'key': self.api_key,
             'section': 'gold',
-            'symbol': symbol, # Placeholder, actual API symbol for XAUUSD history needed
-            'timeframe': timeframe, # Placeholder, actual API timeframe format needed
-            'history': 'ohlcv', # Speculative
-            'count': str(count)
+            'symbol': symbol,
+            'history': '2'
         }
-        logger.info(f"Attempting to fetch historical data from BrsAPI with params: {params}")
+        if date_start:
+            params['date_start'] = date_start # Shamsi YYYY-MM-DD
+        if date_end:
+            params['date_end'] = date_end # Shamsi YYYY-MM-DD
+
+        logger.info(f"Attempting to fetch daily historical data from BrsAPI with params: {params}")
         data = self._make_request(params)
 
-        if not data or not isinstance(data, dict): # Check if data is None or not a dict
-            logger.error(f"Failed to fetch or received invalid data from BrsAPI for historical data. Params: {params}")
+        if not data or not isinstance(data, dict):
+            logger.error(f"Failed to fetch or received invalid data from BrsAPI for daily historical data. Params: {params}")
             return None
 
-        if not data.get('successful'): # Check for 'successful' key specifically
-            logger.error(f"BrsAPI historical data request not successful: {data.get('message_error', 'Unknown error')}. Params: {params}")
+        if not data.get('successful'):
+            logger.error(f"BrsAPI daily historical data request not successful: {data.get('message_error', 'Unknown error')}. Params: {params}")
             return None
 
-        # SPECULATIVE PARSING LOGIC:
-        ohlcv_list = data.get('candles', data.get('history_data')) # Try common keys
+        ohlcv_list = data.get('history_daily')
 
         if not ohlcv_list or not isinstance(ohlcv_list, list):
-            logger.error(f"Historical data format from BrsAPI is not as expected (e.g., missing 'candles' or 'history_data' list). Response keys: {list(data.keys())}")
+            logger.error(f"Daily historical data format from BrsAPI is not as expected (missing 'history_daily' list or not a list). Response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
             return None
 
         processed_candles = []
         for candle_data in ohlcv_list:
             if not isinstance(candle_data, dict):
-                logger.warning(f"Skipping invalid candle data item (not a dict): {candle_data}")
+                logger.warning(f"Skipping invalid daily candle data item (not a dict): {candle_data}")
                 continue
             try:
-                # Attempt to parse timestamp (highly speculative)
-                ts_val = candle_data.get('timestamp', candle_data.get('date', candle_data.get('time')))
-                ts = pd.to_datetime(ts_val, unit='s', errors='coerce') # Try unixtime
-                if pd.isna(ts):
-                    ts = pd.to_datetime(ts_val, errors='coerce') # Try direct datetime string parsing
+                shamsi_date_str = candle_data.get('date')
+                if not shamsi_date_str:
+                    logger.warning(f"Missing 'date' in daily candle data: {candle_data}")
+                    continue
 
-                if pd.isna(ts):
-                    logger.warning(f"Could not parse valid timestamp from candle data: {candle_data}")
+                try:
+                    year, month, day = map(int, shamsi_date_str.split('/'))
+                    jdate = jdatetime.date(year, month, day)
+                    gregorian_date = jdate.togregorian()
+                    ts = pd.Timestamp(gregorian_date)
+                except Exception as date_conv_err:
+                    logger.warning(f"Error converting Shamsi date '{shamsi_date_str}': {date_conv_err} from candle: {candle_data}")
                     continue
 
                 processed_candles.append({
                     'Timestamp': ts,
-                    'Open': float(candle_data.get('open', candle_data.get('o', 0.0))),
-                    'High': float(candle_data.get('high', candle_data.get('h', 0.0))),
-                    'Low': float(candle_data.get('low', candle_data.get('l', 0.0))),
-                    'Close': float(candle_data.get('close', candle_data.get('c', 0.0))),
-                    'Volume': float(candle_data.get('volume', candle_data.get('v', 0.0)))
+                    'Open': float(candle_data.get('open', 0.0)),
+                    'High': float(candle_data.get('high', 0.0)),
+                    'Low': float(candle_data.get('low', 0.0)),
+                    'Close': float(candle_data.get('close', 0.0)),
+                    'Volume': 0.0 # Volume not provided by this endpoint
                 })
             except (ValueError, TypeError) as e:
-                logger.warning(f"Error processing individual candle data {candle_data}: {e}")
+                logger.warning(f"Error processing daily candle data contents {candle_data}: {e}")
                 continue
 
         if not processed_candles:
-            logger.error("No valid historical candles could be processed from BrsAPI response, though data was received.")
+            logger.error("No valid daily historical candles could be processed from BrsAPI response, though data was received.")
             return None
 
         df = pd.DataFrame(processed_candles)
         if df.empty:
-            logger.error("Resulting DataFrame is empty after processing candles.")
+            logger.error("Resulting DataFrame is empty after processing daily candles.")
             return None
 
         df = df.set_index('Timestamp')
         df = df.sort_index()
-        logger.info(f"Successfully processed {len(df)} historical candles for {symbol} from BrsAPI.")
+        logger.info(f"Successfully processed {len(df)} daily historical candles for {symbol} from BrsAPI.")
         return df
 
 # Global instance

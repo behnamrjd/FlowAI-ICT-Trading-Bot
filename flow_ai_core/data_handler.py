@@ -1,11 +1,12 @@
 import pandas as pd
 import numpy as np
 import logging
-from datetime import datetime, timedelta, timezone # Added timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List, Tuple
+import jdatetime # Added
 from .data_sources.brsapi_fetcher import BrsAPIFetcher
 from .config import (
-    HTF_TIMEFRAMES, LTF_TIMEFRAME, ICT_ENABLED, # ICT_ENABLED is already here
+    HTF_TIMEFRAMES, LTF_TIMEFRAME, ICT_ENABLED,
     ORDER_BLOCK_DETECTION, FAIR_VALUE_GAP_DETECTION,
     LIQUIDITY_SWEEP_DETECTION, ICTConfig
 )
@@ -25,53 +26,62 @@ class ICTDataHandler:
     def get_processed_data(self, symbol: str = "GOLD", timeframe: str = "1h", limit: int = 1000) -> pd.DataFrame:
         """دریافت و پردازش داده‌های ICT-enhanced"""
         try:
-            logger.info(f"Attempting to fetch REAL historical data for {symbol} ({timeframe}, {limit} candles).")
-            
-            # TODO: Verify the correct API symbol for historical XAUUSD data with BrsAPI documentation.
-            api_symbol_for_historical = "ounce" # Placeholder, adjust as needed. For XAUUSD, BrsAPI might use 'ounce' or a specific symbol.
+            # Note: 'timeframe' param might be misleading if only daily data is fetched from BrsAPI.
+            logger.info(f"Attempting to fetch REAL DAILY historical data for {symbol} (requested timeframe: {timeframe}, limit: {limit} days).")
 
-            historical_df = self.brs_fetcher.get_historical_gold_ohlcv(
-                symbol=api_symbol_for_historical, timeframe=timeframe, count=limit
+            # Calculate Shamsi date range for the API call
+            j_today = jdatetime.date.today()
+            shamsi_date_end_str = j_today.strftime('%Y-%m-%d')
+            # Subtract (limit - 1) because if limit is 1, we want just today.
+            # If limit is 2, we want today and yesterday.
+            j_start_date = j_today - timedelta(days=max(0, limit - 1))
+            shamsi_date_start_str = j_start_date.strftime('%Y-%m-%d')
+            logger.info(f"Calculated Shamsi date range for BrsAPI: {shamsi_date_start_str} to {shamsi_date_end_str}")
+
+            api_symbol_for_historical = "XAUUSD"
+
+            historical_df = self.brs_fetcher.get_daily_historical_gold(
+                symbol=api_symbol_for_historical,
+                date_start=shamsi_date_start_str,
+                date_end=shamsi_date_end_str
             )
 
             data: Optional[pd.DataFrame] = None
 
             if historical_df is not None and not historical_df.empty:
-                logger.info(f"Successfully fetched {len(historical_df)} real historical candles for {symbol} from BrsAPI.")
+                logger.info(f"Successfully fetched {len(historical_df)} REAL DAILY historical candles for {symbol} from BrsAPI.")
                 data = historical_df
-                # Column naming and indexing should be handled by get_historical_gold_ohlcv
+                if timeframe != '1d':
+                    logger.warning(f"Requested timeframe was '{timeframe}', but BrsAPI provided DAILY data. Analysis will use daily data.")
             else:
                 logger.warning(
-                    f"Failed to fetch real historical data for {symbol} via BrsAPI. "
+                    f"Failed to fetch real daily historical data for {symbol} via BrsAPI. "
                     f"FALLING BACK TO SYNTHETIC DATA GENERATION. THIS IS NOT SUITABLE FOR LIVE TRADING."
                 )
-                # Fallback to synthetic data
-                # get_real_time_gold now returns a dict {'price': float} or None
-                current_price_dict = self.brs_fetcher.get_real_time_gold()
-
-                if not current_price_dict or 'price' not in current_price_dict:
+                current_price_data = self.brs_fetcher.get_real_time_gold()
+                if not current_price_data or 'price' not in current_price_data:
                     logger.error("CRITICAL: Failed to get current price from BrsAPI for synthetic data fallback. Cannot proceed.")
                     return pd.DataFrame()
 
-                current_price = float(current_price_dict['price'])
+                current_price = float(current_price_data['price'])
+                # For synthetic data, the original 'timeframe' and 'limit' for candle generation are used.
                 data = self._generate_enhanced_historical_data(current_price, timeframe, limit)
                 if data.empty:
                      logger.error("Synthetic data generation also failed.")
                      return pd.DataFrame()
 
-            if data.empty: # Should be caught by earlier checks, but as a safeguard
+            if data.empty:
                 logger.error(f"No data (real or synthetic) available for {symbol}.")
                 return pd.DataFrame()
             
-            # Process data (common for both real and synthetic paths)
             data = self._add_technical_indicators(data)
             if ICT_ENABLED:
                 data = self._add_ict_analysis(data)
             
-            self.price_history[f"{symbol}_{timeframe}"] = data
-            self.last_update = datetime.now(timezone.utc) # Use timezone-aware datetime
+            self.price_history[f"{symbol}_{timeframe}"] = data # Key uses requested timeframe
+            self.last_update = datetime.now(timezone.utc)
             
-            logger.info(f"✅ Processed {len(data)} candles for {symbol} with ICT analysis.")
+            logger.info(f"✅ Processed {len(data)} candles for {symbol} (data granularity might be daily if real fetch succeeded).")
             return data
             
         except Exception as e:
