@@ -155,6 +155,16 @@ DEBUG_MODE = get_env_var('DEBUG_MODE', False, var_type=bool)
 TESTING_MODE = get_env_var('TESTING_MODE', False, var_type=bool)
 PAPER_TRADING = get_env_var('PAPER_TRADING', True, var_type=bool)
 
+# ===== NEWS HANDLING CONFIGURATION =====
+NEWS_FETCH_URL = get_env_var('NEWS_FETCH_URL', 'https://nfs.faireconomy.media/ff_calendar_thisweek.json', var_type=str)
+# Comma-separated list, e.g., "USD,EUR"
+NEWS_MONITORED_CURRENCIES = get_env_var('NEWS_MONITORED_CURRENCIES', 'USD', var_type=list)
+# Comma-separated, e.g., "High,Medium,Low"
+NEWS_MONITORED_IMPACTS = get_env_var('NEWS_MONITORED_IMPACTS', 'High,Medium', var_type=list)
+NEWS_BLACKOUT_MINUTES_BEFORE = get_env_var('NEWS_BLACKOUT_MINUTES_BEFORE', 30, var_type=int)
+NEWS_BLACKOUT_MINUTES_AFTER = get_env_var('NEWS_BLACKOUT_MINUTES_AFTER', 60, var_type=int)
+NEWS_CACHE_TTL_SECONDS = get_env_var('NEWS_CACHE_TTL_SECONDS', 3600, var_type=int) # 1 hour
+
 # ===== ICT SPECIFIC CONFIGURATIONS =====
 class ICTConfig:
     """ICT Strategy specific configurations"""
@@ -211,6 +221,20 @@ def validate_config():
 
     if USD_IRR_EXCHANGE_RATE <= 0:
         errors.append("USD_IRR_EXCHANGE_RATE must be a positive number.")
+
+    # News Handling Validation
+    if not NEWS_FETCH_URL:
+        errors.append("NEWS_FETCH_URL is required.")
+    if not NEWS_MONITORED_CURRENCIES:
+        errors.append("NEWS_MONITORED_CURRENCIES cannot be empty if news handling is active.")
+    if not NEWS_MONITORED_IMPACTS:
+        errors.append("NEWS_MONITORED_IMPACTS cannot be empty if news handling is active.")
+    if NEWS_BLACKOUT_MINUTES_BEFORE < 0:
+        errors.append("NEWS_BLACKOUT_MINUTES_BEFORE cannot be negative.")
+    if NEWS_BLACKOUT_MINUTES_AFTER < 0:
+        errors.append("NEWS_BLACKOUT_MINUTES_AFTER cannot be negative.")
+    if NEWS_CACHE_TTL_SECONDS <= 0:
+        errors.append("NEWS_CACHE_TTL_SECONDS must be positive.")
     
     if errors:
         for error in errors:

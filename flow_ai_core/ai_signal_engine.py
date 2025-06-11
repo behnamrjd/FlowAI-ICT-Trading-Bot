@@ -6,8 +6,24 @@ from typing import Dict, Optional, List
 from .data_handler import get_processed_data, get_real_time_price
 from .data_sources.brsapi_fetcher import get_brsapi_gold_price, get_brsapi_status
 import talib
+from ..news_handler import EconomicNewsHandler
+from .. import config # To access news configuration settings
 
 logger = logging.getLogger(__name__)
+
+# Initialize News Handler globally for this module
+# This assumes config is loaded when this module is imported.
+try:
+    news_handler_instance = EconomicNewsHandler(
+        news_url=config.NEWS_FETCH_URL,
+        monitored_currencies=config.NEWS_MONITORED_CURRENCIES,
+        monitored_impacts=config.NEWS_MONITORED_IMPACTS,
+        cache_ttl_seconds=config.NEWS_CACHE_TTL_SECONDS
+    )
+    logger.info("EconomicNewsHandler initialized successfully in ai_signal_engine.")
+except Exception as e:
+    logger.error(f"CRITICAL: Failed to initialize EconomicNewsHandler in ai_signal_engine: {e}. News checking will be disabled.")
+    news_handler_instance = None
 
 class AISignalEngine:
     def __init__(self):
@@ -123,6 +139,38 @@ class AISignalEngine:
             if not indicators:
                 logger.error("Failed to calculate technical indicators")
                 return None
+
+            # News Check
+            if news_handler_instance:
+                try:
+                    active_news_events = news_handler_instance.get_upcoming_relevant_events(
+                        minutes_before_event_start=config.NEWS_BLACKOUT_MINUTES_BEFORE,
+                        minutes_after_event_start=config.NEWS_BLACKOUT_MINUTES_AFTER
+                    )
+                    if active_news_events:
+                        event_titles = [event['title'] for event in active_news_events]
+                        reason = f"News blackout: {', '.join(event_titles)}"
+                        logger.info(f"Signal generation paused due to active high-impact news: {reason}")
+                        # Construct a 'HOLD' signal response including current price from indicators
+                        return {
+                            'action': 'HOLD',
+                            'reason': reason,
+                            'confidence': 0.99, # High confidence in holding due to news
+                            'current_price': indicators.get('price', 0.0),
+                            'entry_price': indicators.get('price', 0.0), # For consistency
+                            'target_price': indicators.get('price', 0.0),
+                            'stop_loss': indicators.get('price', 0.0),
+                            'timestamp': datetime.now(timezone.utc),
+                            'indicators': indicators, # Include indicators for context
+                            'analysis_details': [reason],
+                            'bullish_score': 0, # No bullish/bearish analysis performed
+                            'bearish_score': 0,
+                            'market_active': self.is_market_active(), # Current market status
+                            'forced': force_analysis,
+                            'news_event_active': True # Flag indicating news interference
+                        }
+                except Exception as e_news:
+                    logger.error(f"Error during news check: {e_news}. Proceeding without news-based pause.")
             
             # تحلیل AI
             signal = self._analyze_market_conditions(indicators, force_analysis)
