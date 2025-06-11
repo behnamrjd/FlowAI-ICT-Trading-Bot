@@ -1,15 +1,15 @@
 import pandas as pd
 import numpy as np
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # Added timezone
 from typing import Dict, Optional, List, Tuple
 from .data_sources.brsapi_fetcher import BrsAPIFetcher
 from .config import (
-    HTF_TIMEFRAMES, LTF_TIMEFRAME, ICT_ENABLED,
+    HTF_TIMEFRAMES, LTF_TIMEFRAME, ICT_ENABLED, # ICT_ENABLED is already here
     ORDER_BLOCK_DETECTION, FAIR_VALUE_GAP_DETECTION,
     LIQUIDITY_SWEEP_DETECTION, ICTConfig
 )
-import talib
+import ta
 
 logger = logging.getLogger(__name__)
 
@@ -25,40 +25,59 @@ class ICTDataHandler:
     def get_processed_data(self, symbol: str = "GOLD", timeframe: str = "1h", limit: int = 1000) -> pd.DataFrame:
         """دریافت و پردازش داده‌های ICT-enhanced"""
         try:
-            logger.info(f"Getting processed data for {symbol} on {timeframe}")
+            logger.info(f"Attempting to fetch REAL historical data for {symbol} ({timeframe}, {limit} candles).")
             
-            # دریافت قیمت real-time از BrsAPI
-            current_price_data = self.brs_fetcher.get_real_time_gold()
-            
-            if not current_price_data:
-                logger.error("Failed to get current price from BrsAPI")
+            # TODO: Verify the correct API symbol for historical XAUUSD data with BrsAPI documentation.
+            api_symbol_for_historical = "ounce" # Placeholder, adjust as needed. For XAUUSD, BrsAPI might use 'ounce' or a specific symbol.
+
+            historical_df = self.brs_fetcher.get_historical_gold_ohlcv(
+                symbol=api_symbol_for_historical, timeframe=timeframe, count=limit
+            )
+
+            data: Optional[pd.DataFrame] = None
+
+            if historical_df is not None and not historical_df.empty:
+                logger.info(f"Successfully fetched {len(historical_df)} real historical candles for {symbol} from BrsAPI.")
+                data = historical_df
+                # Column naming and indexing should be handled by get_historical_gold_ohlcv
+            else:
+                logger.warning(
+                    f"Failed to fetch real historical data for {symbol} via BrsAPI. "
+                    f"FALLING BACK TO SYNTHETIC DATA GENERATION. THIS IS NOT SUITABLE FOR LIVE TRADING."
+                )
+                # Fallback to synthetic data
+                # get_real_time_gold now returns a dict {'price': float} or None
+                current_price_dict = self.brs_fetcher.get_real_time_gold()
+
+                if not current_price_dict or 'price' not in current_price_dict:
+                    logger.error("CRITICAL: Failed to get current price from BrsAPI for synthetic data fallback. Cannot proceed.")
+                    return pd.DataFrame()
+
+                current_price = float(current_price_dict['price'])
+                data = self._generate_enhanced_historical_data(current_price, timeframe, limit)
+                if data.empty:
+                     logger.error("Synthetic data generation also failed.")
+                     return pd.DataFrame()
+
+            if data.empty: # Should be caught by earlier checks, but as a safeguard
+                logger.error(f"No data (real or synthetic) available for {symbol}.")
                 return pd.DataFrame()
             
-            current_price = current_price_data['price']
-            
-            # تولید داده‌های تاریخی (در آینده از BrsAPI historical استفاده خواهیم کرد)
-            data = self._generate_enhanced_historical_data(current_price, timeframe, limit)
-            
-            if data.empty:
-                logger.error("No historical data generated")
-                return pd.DataFrame()
-            
-            # اضافه کردن اندیکاتورهای تکنیکال
+            # Process data (common for both real and synthetic paths)
             data = self._add_technical_indicators(data)
-            
-            # اضافه کردن تحلیل‌های ICT
             if ICT_ENABLED:
                 data = self._add_ict_analysis(data)
             
-            # ذخیره در cache
             self.price_history[f"{symbol}_{timeframe}"] = data
-            self.last_update = datetime.now()
+            self.last_update = datetime.now(timezone.utc) # Use timezone-aware datetime
             
-            logger.info(f"✅ Processed {len(data)} candles for {symbol} with ICT analysis")
+            logger.info(f"✅ Processed {len(data)} candles for {symbol} with ICT analysis.")
             return data
             
         except Exception as e:
             logger.error(f"Error in get_processed_data: {e}")
+            import traceback
+            logger.error(traceback.format_exc()) # Log full traceback
             return pd.DataFrame()
     
     def _generate_enhanced_historical_data(self, current_price: float, timeframe: str, limit: int) -> pd.DataFrame:
@@ -175,33 +194,33 @@ class ICTDataHandler:
             low_prices = data['Low'].values
             
             # Moving Averages
-            data['SMA_20'] = talib.SMA(close_prices, timeperiod=20)
-            data['SMA_50'] = talib.SMA(close_prices, timeperiod=50)
-            data['EMA_12'] = talib.EMA(close_prices, timeperiod=12)
-            data['EMA_26'] = talib.EMA(close_prices, timeperiod=26)
+            data['SMA_20'] = ta.trend.SMA(close_prices, timeperiod=20)
+            data['SMA_50'] = ta.trend.SMA(close_prices, timeperiod=50)
+            data['EMA_12'] = ta.trend.EMA(close_prices, timeperiod=12)
+            data['EMA_26'] = ta.trend.EMA(close_prices, timeperiod=26)
             
             # RSI
-            data['RSI'] = talib.RSI(close_prices, timeperiod=14)
+            data['RSI'] = ta.trend.RSI(close_prices, timeperiod=14)
             
             # MACD
-            macd, macd_signal, macd_hist = talib.MACD(close_prices)
+            macd, macd_signal, macd_hist = ta.trend.MACD(close_prices)
             data['MACD'] = macd
             data['MACD_Signal'] = macd_signal
             data['MACD_Histogram'] = macd_hist
             
             # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = talib.BBANDS(close_prices)
+            bb_upper, bb_middle, bb_lower = ta.trend.BBANDS(close_prices)
             data['BB_Upper'] = bb_upper
             data['BB_Middle'] = bb_middle
             data['BB_Lower'] = bb_lower
             
             # Stochastic
-            stoch_k, stoch_d = talib.STOCH(high_prices, low_prices, close_prices)
+            stoch_k, stoch_d = ta.trend.STOCH(high_prices, low_prices, close_prices)
             data['Stoch_K'] = stoch_k
             data['Stoch_D'] = stoch_d
             
             # ATR
-            data['ATR'] = talib.ATR(high_prices, low_prices, close_prices, timeperiod=14)
+            data['ATR'] = ta.trend.ATR(high_prices, low_prices, close_prices, timeperiod=14)
             
             logger.debug("Technical indicators added successfully")
             return data
@@ -422,14 +441,22 @@ class ICTDataHandler:
             logger.error(f"Error analyzing market structure: {e}")
             return data
     
-    def get_real_time_price(self) -> float:
-        """دریافت قیمت real-time"""
+    def get_real_time_price(self) -> Optional[float]:
+        """
+        دریافت قیمت real-time.
+        Returns:
+            Optional[float]: The real-time price as a float, or None if fetching fails or data is invalid.
+        """
         try:
             price_data = self.brs_fetcher.get_real_time_gold()
-            return price_data['price'] if price_data else 3325.0
+            if price_data and 'price' in price_data:
+                return float(price_data['price'])
+            else:
+                logger.warning("Failed to get valid price data from BrsAPIFetcher.")
+                return None
         except Exception as e:
             logger.error(f"Error getting real-time price: {e}")
-            return 3325.0
+            return None
     
     def get_ict_signals(self, data: pd.DataFrame) -> Dict:
         """استخراج سیگنال‌های ICT"""

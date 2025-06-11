@@ -643,71 +643,12 @@ quick_install() {
     print_step_simple "${steps[5]}" $current $total "running"
     source venv/bin/activate
     
-    # Create fixed requirements.txt
-    cat > requirements.txt << 'EOF'
-python-telegram-bot==13.15
-urllib3==1.26.18
-pandas>=1.5.0,<2.0.0
-numpy>=1.21.0,<2.0.0
-requests>=2.28.0,<3.0.0
-python-dotenv>=0.19.0,<1.0.0
-ta==0.10.2
-jdatetime>=4.1.0,<5.0.0
-pytz>=2022.1
-aiohttp>=3.8.0,<4.0.0
-colorlog>=6.6.0,<7.0.0
-psutil>=5.9.0,<6.0.0
-six
-certifi
-cryptography
-apscheduler<4.0.0
-EOF
-    
-    # Install with specific versions to avoid conflicts
-    local packages=(
-        "python-telegram-bot==13.15"
-        "urllib3==1.26.18"
-        "pandas>=1.5.0,<2.0.0"
-        "numpy>=1.21.0,<2.0.0"
-        "requests>=2.28.0,<3.0.0"
-        "python-dotenv>=0.19.0,<1.0.0"
-        "ta==0.10.2"
-        "jdatetime>=4.1.0,<5.0.0"
-        "pytz>=2022.1"
-        "aiohttp>=3.8.0,<4.0.0"
-        "colorlog>=6.6.0,<7.0.0"
-        "psutil>=5.9.0,<6.0.0"
-        "six"
-        "certifi"
-        "cryptography"
-        "apscheduler<4.0.0"
-    )
-    
-    local failed_packages=()
-    local success_count=0
-    
-    for package in "${packages[@]}"; do
-        local pkg_name=$(echo "$package" | cut -d'=' -f1 | cut -d'>' -f1 | cut -d'<' -f1)
-        echo -e "${CYAN}  Installing $pkg_name...${NC}"
-        
-        if timeout 60s pip install "$package" >/dev/null 2>&1; then
-            echo -e "${GREEN}    ✓ $pkg_name installed${NC}"
-            ((success_count++))
-        else
-            echo -e "${RED}    ✗ $pkg_name failed${NC}"
-            failed_packages+=("$pkg_name")
-        fi
-    done
-    
-    if [ $success_count -gt 12 ]; then
+    if pip install -r requirements.txt; then
         print_step_simple "${steps[5]}" $current $total "success"
-        if [ ${#failed_packages[@]} -gt 0 ]; then
-            print_warning "Some packages failed: ${failed_packages[*]}"
-        fi
     else
         print_step_simple "${steps[5]}" $current $total "error"
-        log_error "Python Dependencies" "Too many packages failed: ${failed_packages[*]}" "pip install" "1"
-        print_warning "Many packages failed but continuing..."
+        log_error "Python Dependencies" "Failed to install from requirements.txt" "pip install -r requirements.txt" "$?"
+        print_warning "Python dependencies installation failed. Continuing, but errors are likely."
     fi
     
     # Step 7: Directory Structure

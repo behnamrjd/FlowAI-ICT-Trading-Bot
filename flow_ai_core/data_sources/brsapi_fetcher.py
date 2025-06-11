@@ -1,6 +1,9 @@
 import requests
 import logging
 from datetime import datetime
+from typing import Optional # Added
+import pandas as pd # Added
+from ..config import USD_IRR_EXCHANGE_RATE
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +127,7 @@ class BrsAPIFetcher:
             if 'IR_GOLD_18K' in item.get('symbol', ''):
                 try:
                     price_rial = float(item.get('price', 0))
-                    price_usd = price_rial / 70000  # تبدیل به دلار
+                    price_usd = price_rial / USD_IRR_EXCHANGE_RATE  # تبدیل به دلار
                     
                     result = {
                         'price': price_usd,
@@ -148,6 +151,79 @@ class BrsAPIFetcher:
         
         logger.warning("No usable gold data found in BrsAPI response")
         return None
+
+    def get_historical_gold_ohlcv(self, symbol: str, timeframe: str, count: int = 200) -> Optional[pd.DataFrame]:
+        """
+        Attempts to fetch historical OHLCV data for gold.
+        NOTE: The exact API parameters for historical data are unknown.
+        This method is a template and may require adjustment based on BrsAPI documentation.
+        """
+        params = {
+            'section': 'gold',
+            'symbol': symbol, # Placeholder, actual API symbol for XAUUSD history needed
+            'timeframe': timeframe, # Placeholder, actual API timeframe format needed
+            'history': 'ohlcv', # Speculative
+            'count': str(count)
+        }
+        logger.info(f"Attempting to fetch historical data from BrsAPI with params: {params}")
+        data = self._make_request(params)
+
+        if not data or not isinstance(data, dict): # Check if data is None or not a dict
+            logger.error(f"Failed to fetch or received invalid data from BrsAPI for historical data. Params: {params}")
+            return None
+
+        if not data.get('successful'): # Check for 'successful' key specifically
+            logger.error(f"BrsAPI historical data request not successful: {data.get('message_error', 'Unknown error')}. Params: {params}")
+            return None
+
+        # SPECULATIVE PARSING LOGIC:
+        ohlcv_list = data.get('candles', data.get('history_data')) # Try common keys
+
+        if not ohlcv_list or not isinstance(ohlcv_list, list):
+            logger.error(f"Historical data format from BrsAPI is not as expected (e.g., missing 'candles' or 'history_data' list). Response keys: {list(data.keys())}")
+            return None
+
+        processed_candles = []
+        for candle_data in ohlcv_list:
+            if not isinstance(candle_data, dict):
+                logger.warning(f"Skipping invalid candle data item (not a dict): {candle_data}")
+                continue
+            try:
+                # Attempt to parse timestamp (highly speculative)
+                ts_val = candle_data.get('timestamp', candle_data.get('date', candle_data.get('time')))
+                ts = pd.to_datetime(ts_val, unit='s', errors='coerce') # Try unixtime
+                if pd.isna(ts):
+                    ts = pd.to_datetime(ts_val, errors='coerce') # Try direct datetime string parsing
+
+                if pd.isna(ts):
+                    logger.warning(f"Could not parse valid timestamp from candle data: {candle_data}")
+                    continue
+
+                processed_candles.append({
+                    'Timestamp': ts,
+                    'Open': float(candle_data.get('open', candle_data.get('o', 0.0))),
+                    'High': float(candle_data.get('high', candle_data.get('h', 0.0))),
+                    'Low': float(candle_data.get('low', candle_data.get('l', 0.0))),
+                    'Close': float(candle_data.get('close', candle_data.get('c', 0.0))),
+                    'Volume': float(candle_data.get('volume', candle_data.get('v', 0.0)))
+                })
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error processing individual candle data {candle_data}: {e}")
+                continue
+
+        if not processed_candles:
+            logger.error("No valid historical candles could be processed from BrsAPI response, though data was received.")
+            return None
+
+        df = pd.DataFrame(processed_candles)
+        if df.empty:
+            logger.error("Resulting DataFrame is empty after processing candles.")
+            return None
+
+        df = df.set_index('Timestamp')
+        df = df.sort_index()
+        logger.info(f"Successfully processed {len(df)} historical candles for {symbol} from BrsAPI.")
+        return df
 
 # Global instance
 brs_fetcher = BrsAPIFetcher()
