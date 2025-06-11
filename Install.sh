@@ -619,12 +619,12 @@ quick_install() {
         return 1
     }
 
-    print_step "Switching to branch 'feature/standardize-ta-library'..."
-    if git checkout feature/standardize-ta-library && git pull origin feature/standardize-ta-library; then
-        print_success "Successfully checked out and updated branch 'feature/standardize-ta-library'."
+    print_step "Switching to branch 'jules-all-updates-v1'..."
+    if git checkout jules-all-updates-v1 && git pull origin jules-all-updates-v1; then
+        print_success "Successfully checked out and updated branch 'jules-all-updates-v1'."
     else
-        print_warning "Failed to checkout or update branch 'feature/standardize-ta-library'. Will attempt to use current branch."
-        log_error "Git Checkout" "Failed to checkout feature/standardize-ta-library" "git checkout feature/standardize-ta-library" "$?"
+        print_warning "Failed to checkout or update branch 'jules-all-updates-v1'. Will attempt to use current branch."
+        log_error "Git Checkout" "Failed to checkout jules-all-updates-v1" "git checkout jules-all-updates-v1" "$?"
     fi
     
     # Remove existing venv if corrupted
