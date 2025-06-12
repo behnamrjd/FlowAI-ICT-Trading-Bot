@@ -5,9 +5,26 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, List
 from .data_handler import get_processed_data, get_real_time_price
 from .data_sources.brsapi_fetcher import get_brsapi_gold_price, get_brsapi_status
-import talib
+import ta # Replaced talib
+# pandas is already imported as pd at the top of the file
+from ..news_handler import EconomicNewsHandler
+from .. import config # To access news configuration settings
 
 logger = logging.getLogger(__name__)
+
+# Initialize News Handler globally for this module
+# This assumes config is loaded when this module is imported.
+try:
+    news_handler_instance = EconomicNewsHandler(
+        news_url=config.NEWS_FETCH_URL,
+        monitored_currencies=config.NEWS_MONITORED_CURRENCIES,
+        monitored_impacts=config.NEWS_MONITORED_IMPACTS,
+        cache_ttl_seconds=config.NEWS_CACHE_TTL_SECONDS
+    )
+    logger.info("EconomicNewsHandler initialized successfully in ai_signal_engine.")
+except Exception as e:
+    logger.error(f"CRITICAL: Failed to initialize EconomicNewsHandler in ai_signal_engine: {e}. News checking will be disabled.")
+    news_handler_instance = None
 
 class AISignalEngine:
     def __init__(self):
@@ -44,57 +61,75 @@ class AISignalEngine:
             high_prices = data['High'].values
             low_prices = data['Low'].values
             volumes = data['Volume'].values
-            
+
+            # Convert numpy arrays to pandas Series for 'ta' library
+            close_series = pd.Series(close_prices)
+            high_series = pd.Series(high_prices)
+            low_series = pd.Series(low_prices)
+            # volumes_series = pd.Series(volumes) # If needed by any 'ta' indicator
+
             # RSI
-            rsi = talib.RSI(close_prices, timeperiod=14)
-            current_rsi = rsi[-1] if not np.isnan(rsi[-1]) else 50
+            rsi_indicator = ta.momentum.RSIIndicator(close=close_series, window=14)
+            rsi_series = rsi_indicator.rsi()
+            current_rsi = rsi_series.iloc[-1] if not pd.isna(rsi_series.iloc[-1]) else 50
             
             # MACD
-            macd, macd_signal, macd_hist = talib.MACD(close_prices)
-            current_macd = macd[-1] if not np.isnan(macd[-1]) else 0
-            current_macd_signal = macd_signal[-1] if not np.isnan(macd_signal[-1]) else 0
+            macd_obj = ta.trend.MACD(close=close_series, window_slow=26, window_fast=12, window_sign=9)
+            macd_series = macd_obj.macd()
+            macd_signal_series = macd_obj.macd_signal()
+            macd_hist_series = macd_obj.macd_diff()
+            current_macd = macd_series.iloc[-1] if not pd.isna(macd_series.iloc[-1]) else 0
+            current_macd_signal = macd_signal_series.iloc[-1] if not pd.isna(macd_signal_series.iloc[-1]) else 0
             
             # Moving Averages
-            sma_20 = talib.SMA(close_prices, timeperiod=20)
-            sma_50 = talib.SMA(close_prices, timeperiod=50)
-            ema_12 = talib.EMA(close_prices, timeperiod=12)
-            ema_26 = talib.EMA(close_prices, timeperiod=26)
+            sma_20_series = ta.trend.SMAIndicator(close=close_series, window=20).sma_indicator()
+            sma_50_series = ta.trend.SMAIndicator(close=close_series, window=50).sma_indicator()
+            ema_12_series = ta.trend.EMAIndicator(close=close_series, window=12).ema_indicator()
+            ema_26_series = ta.trend.EMAIndicator(close=close_series, window=26).ema_indicator()
             
-            current_sma_20 = sma_20[-1] if not np.isnan(sma_20[-1]) else close_prices[-1]
-            current_sma_50 = sma_50[-1] if not np.isnan(sma_50[-1]) else close_prices[-1]
-            current_ema_12 = ema_12[-1] if not np.isnan(ema_12[-1]) else close_prices[-1]
-            current_ema_26 = ema_26[-1] if not np.isnan(ema_26[-1]) else close_prices[-1]
+            current_sma_20 = sma_20_series.iloc[-1] if not pd.isna(sma_20_series.iloc[-1]) else close_series.iloc[-1]
+            current_sma_50 = sma_50_series.iloc[-1] if not pd.isna(sma_50_series.iloc[-1]) else close_series.iloc[-1]
+            current_ema_12 = ema_12_series.iloc[-1] if not pd.isna(ema_12_series.iloc[-1]) else close_series.iloc[-1]
+            current_ema_26 = ema_26_series.iloc[-1] if not pd.isna(ema_26_series.iloc[-1]) else close_series.iloc[-1]
             
             # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = talib.BBANDS(close_prices)
-            current_bb_upper = bb_upper[-1] if not np.isnan(bb_upper[-1]) else close_prices[-1] * 1.02
-            current_bb_lower = bb_lower[-1] if not np.isnan(bb_lower[-1]) else close_prices[-1] * 0.98
+            bb_indicator = ta.volatility.BollingerBands(close=close_series, window=20, window_dev=2)
+            bb_upper_series = bb_indicator.bollinger_hband()
+            bb_middle_series = bb_indicator.bollinger_mavg()
+            bb_lower_series = bb_indicator.bollinger_lband()
+            current_bb_upper = bb_upper_series.iloc[-1] if not pd.isna(bb_upper_series.iloc[-1]) else close_series.iloc[-1] * 1.02
+            current_bb_lower = bb_lower_series.iloc[-1] if not pd.isna(bb_lower_series.iloc[-1]) else close_series.iloc[-1] * 0.98
+            current_bb_middle = bb_middle_series.iloc[-1] if not pd.isna(bb_middle_series.iloc[-1]) else close_series.iloc[-1]
             
             # Stochastic
-            stoch_k, stoch_d = talib.STOCH(high_prices, low_prices, close_prices)
-            current_stoch_k = stoch_k[-1] if not np.isnan(stoch_k[-1]) else 50
+            stoch_indicator = ta.momentum.StochasticOscillator(high=high_series, low=low_series, close=close_series, window=14, smooth_window=3, fillna=False)
+            stoch_k_series = stoch_indicator.stoch()
+            # stoch_d_series = stoch_indicator.stoch_signal() # Not used in current logic, but available
+            current_stoch_k = stoch_k_series.iloc[-1] if not pd.isna(stoch_k_series.iloc[-1]) else 50
             
-            current_price = close_prices[-1]
+            current_price = close_series.iloc[-1]
             
             return {
                 'price': current_price,
                 'rsi': current_rsi,
                 'macd': current_macd,
                 'macd_signal': current_macd_signal,
-                'macd_histogram': current_macd - current_macd_signal,
+                'macd_histogram': current_macd - current_macd_signal, # Retains original logic for histogram value
                 'sma_20': current_sma_20,
                 'sma_50': current_sma_50,
                 'ema_12': current_ema_12,
                 'ema_26': current_ema_26,
                 'bb_upper': current_bb_upper,
                 'bb_lower': current_bb_lower,
-                'bb_middle': (current_bb_upper + current_bb_lower) / 2,
+                'bb_middle': current_bb_middle,
                 'stoch_k': current_stoch_k,
-                'volume': volumes[-1] if len(volumes) > 0 else 1000
+                'volume': volumes[-1] if len(volumes) > 0 else 1000 # Volume remains from original data, 'ta' doesn't calculate it here
             }
             
         except Exception as e:
-            logger.error(f"Error calculating technical indicators: {e}")
+            logger.error(f"Error calculating technical indicators with 'ta' library: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {}
     
     def generate_ai_signal(self, force_analysis: bool = False) -> Optional[Dict]:
@@ -123,6 +158,38 @@ class AISignalEngine:
             if not indicators:
                 logger.error("Failed to calculate technical indicators")
                 return None
+
+            # News Check
+            if news_handler_instance:
+                try:
+                    active_news_events = news_handler_instance.get_upcoming_relevant_events(
+                        minutes_before_event_start=config.NEWS_BLACKOUT_MINUTES_BEFORE,
+                        minutes_after_event_start=config.NEWS_BLACKOUT_MINUTES_AFTER
+                    )
+                    if active_news_events:
+                        event_titles = [event['title'] for event in active_news_events]
+                        reason = f"News blackout: {', '.join(event_titles)}"
+                        logger.info(f"Signal generation paused due to active high-impact news: {reason}")
+                        # Construct a 'HOLD' signal response including current price from indicators
+                        return {
+                            'action': 'HOLD',
+                            'reason': reason,
+                            'confidence': 0.99, # High confidence in holding due to news
+                            'current_price': indicators.get('price', 0.0),
+                            'entry_price': indicators.get('price', 0.0), # For consistency
+                            'target_price': indicators.get('price', 0.0),
+                            'stop_loss': indicators.get('price', 0.0),
+                            'timestamp': datetime.now(timezone.utc),
+                            'indicators': indicators, # Include indicators for context
+                            'analysis_details': [reason],
+                            'bullish_score': 0, # No bullish/bearish analysis performed
+                            'bearish_score': 0,
+                            'market_active': self.is_market_active(), # Current market status
+                            'forced': force_analysis,
+                            'news_event_active': True # Flag indicating news interference
+                        }
+                except Exception as e_news:
+                    logger.error(f"Error during news check: {e_news}. Proceeding without news-based pause.")
             
             # تحلیل AI
             signal = self._analyze_market_conditions(indicators, force_analysis)
