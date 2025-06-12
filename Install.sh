@@ -24,11 +24,25 @@ BACKUP_RETENTION_DAYS=7
 UPDATE_CHECK_URL="https://api.github.com/repos/behnamrjd/FlowAI-ICT-Trading-Bot/commits/main"
 CURRENT_USER=$(whoami)
 USER_HOME="$HOME"
-LOG_FILE="$USER_HOME/flowai_install.log"
-ERROR_LOG="$USER_HOME/flowai_errors.log"
+
+# Unified Logging System
+LOG_FILE="/tmp/flowai-install.log"
+ERROR_LOG="/tmp/flowai-errors.log"
+UPDATE_LOG="/tmp/flowai-update.log"
+
+# Bot Configuration
 TELEGRAM_TOKEN=""
 ADMIN_ID=""
 ERROR_COUNT=0
+
+# Service Configuration
+SERVICE_NAME="flowai-ict-bot"
+SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+VENV_NAME="venv"
+
+# Backup Configuration
+BACKUP_DIR="/tmp/flowai-backup-$(date +%Y%m%d-%H%M%S)"
+MAX_BACKUPS=5
 
 # Initialize log files with proper permissions
 init_logs() {
@@ -1876,6 +1890,119 @@ EOF
     else
         print_success "Telegram update handlers already exist or telegram_bot.py not found"
     fi
+}
+
+create_management_script() {
+    print_step "Creating management script..."
+    
+    cd "$INSTALL_DIR"
+    
+    cat > manage.sh << 'EOF'
+#!/bin/bash
+# FlowAI-ICT Bot Management Script
+# Version: 4.0
+
+SERVICE_NAME="flowai-ict-bot"
+BOT_DIR="/opt/FlowAI-ICT-Trading-Bot"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+show_header() {
+    echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║${NC}              ${CYAN}FlowAI-ICT Bot Management Script${NC}              ${BLUE}║${NC}"
+    echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+show_usage() {
+    show_header
+    echo "Usage: $0 {start|stop|restart|status|logs|update|backup|health}"
+    echo ""
+    echo "Commands:"
+    echo "  start     - Start the bot service"
+    echo "  stop      - Stop the bot service"
+    echo "  restart   - Restart the bot service"
+    echo "  status    - Show detailed service status"
+    echo "  logs      - Show real-time logs"
+    echo "  update    - Update bot to latest version"
+    echo "  backup    - Create manual backup"
+    echo "  health    - Perform health check"
+    echo ""
+}
+
+case "$1" in
+    start)
+        echo -e "${GREEN}Starting FlowAI-ICT Bot...${NC}"
+        sudo systemctl start $SERVICE_NAME
+        sudo systemctl status $SERVICE_NAME --no-pager
+        ;;
+    stop)
+        echo -e "${YELLOW}Stopping FlowAI-ICT Bot...${NC}"
+        sudo systemctl stop $SERVICE_NAME
+        echo "Bot stopped."
+        ;;
+    restart)
+        echo -e "${YELLOW}Restarting FlowAI-ICT Bot...${NC}"
+        sudo systemctl restart $SERVICE_NAME
+        sudo systemctl status $SERVICE_NAME --no-pager
+        ;;
+    status)
+        sudo systemctl status $SERVICE_NAME --no-pager
+        ;;
+    logs)
+        echo -e "${BLUE}Showing real-time logs (Press Ctrl+C to exit)...${NC}"
+        sudo journalctl -u $SERVICE_NAME -f
+        ;;
+    update)
+        echo -e "${BLUE}Updating FlowAI-ICT Bot...${NC}"
+        if [[ -f "$BOT_DIR/scripts/update_bot.sh" ]]; then
+            bash "$BOT_DIR/scripts/update_bot.sh"
+        else
+            echo -e "${RED}Update script not found!${NC}"
+            exit 1
+        fi
+        ;;
+    backup)
+        echo -e "${BLUE}Creating manual backup...${NC}"
+        BACKUP_DIR="/tmp/flowai-manual-backup-$(date +%Y%m%d-%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        
+        if [[ -f "$BOT_DIR/.env" ]]; then
+            cp "$BOT_DIR/.env" "$BACKUP_DIR/"
+            echo "Configuration backed up to: $BACKUP_DIR"
+        fi
+        ;;
+    health)
+        echo -e "${CYAN}🏥 FlowAI-ICT Bot Health Check${NC}"
+        echo ""
+        
+        if systemctl is-active --quiet $SERVICE_NAME; then
+            echo -e "✅ Service Status: ${GREEN}Running${NC}"
+        else
+            echo -e "❌ Service Status: ${RED}Not Running${NC}"
+        fi
+        
+        if [[ -f "$BOT_DIR/.env" ]]; then
+            echo -e "✅ Configuration: ${GREEN}Found${NC}"
+        else
+            echo -e "❌ Configuration: ${RED}Missing${NC}"
+        fi
+        ;;
+    *)
+        show_usage
+        exit 1
+        ;;
+esac
+EOF
+    
+    chmod +x manage.sh
+    print_success "Management script created"
 }
 
 # Main execution
