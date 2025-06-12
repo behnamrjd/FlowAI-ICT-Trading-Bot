@@ -165,6 +165,26 @@ NEWS_BLACKOUT_MINUTES_BEFORE = get_env_var('NEWS_BLACKOUT_MINUTES_BEFORE', 30, v
 NEWS_BLACKOUT_MINUTES_AFTER = get_env_var('NEWS_BLACKOUT_MINUTES_AFTER', 60, var_type=int)
 NEWS_CACHE_TTL_SECONDS = get_env_var('NEWS_CACHE_TTL_SECONDS', 3600, var_type=int) # 1 hour
 
+# ===== ADVANCED ICT PARAMETERS =====
+ICT_SWING_LOOKBACK_PERIODS = get_env_var('ICT_SWING_LOOKBACK_PERIODS', 10, var_type=int)
+ICT_MSS_SWING_LOOKBACK = get_env_var('ICT_MSS_SWING_LOOKBACK', 20, var_type=int)
+ICT_OB_MIN_BODY_RATIO = get_env_var('ICT_OB_MIN_BODY_RATIO', 0.3, var_type=float)
+ICT_PD_ARRAY_LOOKBACK_PERIODS = get_env_var('ICT_PD_ARRAY_LOOKBACK_PERIODS', 50, var_type=int)
+# Minimum Fair Value Gap size as a decimal (e.g., 0.0003 for 0.03%)
+FVG_THRESHOLD = get_env_var('ICT_FVG_THRESHOLD', 0.0003, var_type=float)
+
+_default_retracement_levels_str = "0.236,0.382,0.5,0.618,0.786"
+ICT_PD_RETRACEMENT_LEVELS_STR = get_env_var('ICT_PD_RETRACEMENT_LEVELS', _default_retracement_levels_str)
+ICT_PD_RETRACEMENT_LEVELS = []
+try:
+    if ICT_PD_RETRACEMENT_LEVELS_STR:
+        ICT_PD_RETRACEMENT_LEVELS = [float(x.strip()) for x in ICT_PD_RETRACEMENT_LEVELS_STR.split(',') if x.strip()]
+    if not ICT_PD_RETRACEMENT_LEVELS: # If parsing resulted in empty list or original string was empty
+        raise ValueError("Empty or invalid list")
+except ValueError:
+    logger.warning(f"Invalid format for ICT_PD_RETRACEMENT_LEVELS: '{ICT_PD_RETRACEMENT_LEVELS_STR}'. Using default values.")
+    ICT_PD_RETRACEMENT_LEVELS = [float(x.strip()) for x in _default_retracement_levels_str.split(',')]
+
 # ===== ICT SPECIFIC CONFIGURATIONS =====
 class ICTConfig:
     """ICT Strategy specific configurations"""
@@ -235,6 +255,22 @@ def validate_config():
         errors.append("NEWS_BLACKOUT_MINUTES_AFTER cannot be negative.")
     if NEWS_CACHE_TTL_SECONDS <= 0:
         errors.append("NEWS_CACHE_TTL_SECONDS must be positive.")
+
+    # Advanced ICT Parameters Validation
+    if ICT_SWING_LOOKBACK_PERIODS <= 0:
+        errors.append("ICT_SWING_LOOKBACK_PERIODS must be positive.")
+    if ICT_MSS_SWING_LOOKBACK <= 0:
+        errors.append("ICT_MSS_SWING_LOOKBACK must be positive.")
+    if not (0 < ICT_OB_MIN_BODY_RATIO < 1):
+        errors.append("ICT_OB_MIN_BODY_RATIO must be between 0 and 1.")
+    if ICT_PD_ARRAY_LOOKBACK_PERIODS <= 0:
+        errors.append("ICT_PD_ARRAY_LOOKBACK_PERIODS must be positive.")
+    if FVG_THRESHOLD <= 0:
+        errors.append("FVG_THRESHOLD must be positive.")
+    if not ICT_PD_RETRACEMENT_LEVELS:
+        errors.append("ICT_PD_RETRACEMENT_LEVELS cannot be empty.")
+    if any(not (0 <= level <= 1) for level in ICT_PD_RETRACEMENT_LEVELS):
+        errors.append("All ICT_PD_RETRACEMENT_LEVELS must be between 0 and 1.")
     
     if errors:
         for error in errors:
