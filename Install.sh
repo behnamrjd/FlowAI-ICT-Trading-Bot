@@ -1771,7 +1771,14 @@ management_menu() {
 create_update_script() {
     print_step "Setting up Auto-Update System..."
     
-    cd "$INSTALL_DIR"
+    # Create installation directory if it doesn't exist
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        print_step "Creating installation directory..."
+        sudo mkdir -p "$INSTALL_DIR" || error_exit "Failed to create installation directory"
+        sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$INSTALL_DIR" 2>/dev/null || true
+    fi
+    
+    cd "$INSTALL_DIR" || error_exit "Cannot access installation directory"
     mkdir -p scripts
     
     # Create version lock file
@@ -1807,30 +1814,9 @@ log() {
 }
 
 error_exit() {
-    local message="$1"
-    local exit_code="${2:-1}"
-    
-    echo -e "${RED}❌ ERROR: $message${NC}" >&2
-    
-    # Log error with timestamp
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: $message" >> "$ERROR_LOG" 2>/dev/null || true
-    
-    # Show troubleshooting info
-    echo -e "${YELLOW}📋 Troubleshooting Information:${NC}" >&2
-    echo -e "   • Check logs: $ERROR_LOG" >&2
-    echo -e "   • Installation directory: $INSTALL_DIR" >&2
-    echo -e "   • Service name: $SERVICE_NAME" >&2
-    echo "" >&2
-    
-    # Cleanup
-    rm -f "$UPDATE_LOCK_FILE" 2>/dev/null || true
-    
-    # Final error banner
-    echo -e "${RED}╔══════════════════════════════════════════════════════════════════════════════╗${NC}" >&2
-    echo -e "${RED}║${NC}                               ${BOLD}INSTALLATION FAILED${NC}                              ${RED}║${NC}" >&2
-    echo -e "${RED}╚══════════════════════════════════════════════════════════════════════════════╝${NC}" >&2
-    
-    exit "$exit_code"
+    echo "ERROR: $1" | tee -a "$LOG_FILE"
+    rm -f "$LOCK_FILE"
+    exit 1
 }
 
 # Force remove any existing lock file
