@@ -1627,6 +1627,23 @@ EOF
     
     chmod +x manage.sh
     print_success "Management script created"
+
+# ===== SHOW USAGE FUNCTION =====
+show_usage() {
+    echo "FlowAI-ICT Trading Bot Installation Script v$SCRIPT_VERSION"
+    echo ""
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  --help, -h     Show this help message"
+    echo "  --debug        Enable debug mode"
+    echo "  --force        Force reinstallation"
+    echo "  --no-service   Skip service setup"
+    echo ""
+    echo "Environment Variables:"
+    echo "  DEBUG=1        Enable debug logging"
+    echo "  FORCE=1        Force reinstallation"
+    echo ""
 }
 
 # ===== SYSTEM SERVICE SETUP =====
