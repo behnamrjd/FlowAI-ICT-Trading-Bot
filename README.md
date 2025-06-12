@@ -2,7 +2,7 @@
 
 ## Advanced AI-Powered Gold Trading System with ICT Analysis
 
-**Version:** 2.1 (Fixed All Issues - July 2024)
+**Version:** v4.5
 
 **FlowAI** is an innovative trading bot designed for the gold market (XAUUSD), leveraging advanced AI techniques and Inner Circle Trader (ICT) methodologies to identify high-probability trading setups. This system aims to provide intelligent trading signals and can be configured for automated execution (future feature).
 
