@@ -1517,3 +1517,575 @@ perform_health_check() {
     else
         echo -e "ℹ️  No error log file found"
     fi
+}
+
+show_config_status() {
+    show_header
+    echo -e "${CYAN}📋 Configuration Status${NC}"
+    echo ""
+    
+    if [[ -f "$BOT_DIR/.env" ]]; then
+        echo -e "${GREEN}Configuration file found:${NC} $BOT_DIR/.env"
+        echo ""
+        echo -e "${CYAN}Configuration Summary:${NC}"
+        
+        # Show non-sensitive configuration
+        grep -E "^(ICT_|AI_|LOG_|RISK_)" "$BOT_DIR/.env" 2>/dev/null | head -10 || echo "No configuration variables found"
+        
+        echo ""
+        echo -e "${YELLOW}Note: Sensitive information (tokens, keys) is hidden${NC}"
+    else
+        echo -e "${RED}Configuration file not found!${NC}"
+        echo "Expected location: $BOT_DIR/.env"
+    fi
+}
+
+case "$1" in
+    start)
+        echo -e "${GREEN}Starting FlowAI-ICT Bot...${NC}"
+        sudo systemctl start $SERVICE_NAME
+        sleep 2
+        show_status
+        ;;
+    stop)
+        echo -e "${YELLOW}Stopping FlowAI-ICT Bot...${NC}"
+        sudo systemctl stop $SERVICE_NAME
+        echo "Bot stopped."
+        ;;
+    restart)
+        echo -e "${YELLOW}Restarting FlowAI-ICT Bot...${NC}"
+        sudo systemctl restart $SERVICE_NAME
+        sleep 2
+        show_status
+        ;;
+    status)
+        show_status
+        ;;
+    logs)
+        echo -e "${BLUE}Showing real-time logs (Press Ctrl+C to exit)...${NC}"
+        sudo journalctl -u $SERVICE_NAME -f
+        ;;
+    update)
+        echo -e "${BLUE}Updating FlowAI-ICT Bot...${NC}"
+        if [[ -f "$BOT_DIR/scripts/update_bot.sh" ]]; then
+            bash "$BOT_DIR/scripts/update_bot.sh"
+        else
+            echo -e "${RED}Update script not found!${NC}"
+            exit 1
+        fi
+        ;;
+    backup)
+        echo -e "${BLUE}Creating manual backup...${NC}"
+        BACKUP_DIR="/tmp/flowai-manual-backup-$(date +%Y%m%d-%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        
+        if [[ -f "$BOT_DIR/.env" ]]; then
+            cp "$BOT_DIR/.env" "$BACKUP_DIR/"
+            echo "Configuration backed up"
+        fi
+        
+        if [[ -d "$BOT_DIR/logs" ]]; then
+            cp -r "$BOT_DIR/logs" "$BACKUP_DIR/"
+            echo "Logs backed up"
+        fi
+        
+        if [[ -f "$BOT_DIR/flowai.db" ]]; then
+            cp "$BOT_DIR/flowai.db" "$BACKUP_DIR/"
+            echo "Database backed up"
+        fi
+        
+        echo -e "${GREEN}Manual backup completed: $BACKUP_DIR${NC}"
+        ;;
+    restore)
+        echo -e "${BLUE}Available backups:${NC}"
+        echo ""
+        find /tmp -name "flowai-*backup-*" -type d 2>/dev/null | sort -r | head -10 | while read backup; do
+            if [[ -f "$backup/manifest.txt" ]]; then
+                echo "📁 $backup"
+                echo "   $(head -1 "$backup/manifest.txt" 2>/dev/null || echo 'No description')"
+                echo ""
+            else
+                echo "📁 $backup (no manifest)"
+            fi
+        done
+        echo "To restore, manually copy files from backup directory to $BOT_DIR"
+        echo "Example: cp /tmp/flowai-backup-YYYYMMDD-HHMMSS/.env $BOT_DIR/"
+        ;;
+    health)
+        perform_health_check
+        ;;
+    config)
+        show_config_status
+        ;;
+    *)
+        show_usage
+        exit 1
+        ;;
+esac
+EOF
+    
+    chmod +x manage.sh
+    print_success "Management script created"
+}
+
+# ===== SYSTEM SERVICE SETUP =====
+setup_system_service() {
+    print_step "Setting up System Service..."
+    
+    # Create systemd service file
+    sudo tee "$SERVICE_FILE" > /dev/null << EOF
+[Unit]
+Description=FlowAI-ICT Trading Bot v$SCRIPT_VERSION
+Documentation=https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$USER
+Group=$USER
+WorkingDirectory=$INSTALL_DIR
+Environment=PATH=$INSTALL_DIR/$VENV_NAME/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=$INSTALL_DIR
+Environment=PYTHONUNBUFFERED=1
+ExecStart=$INSTALL_DIR/$VENV_NAME/bin/python telegram_bot.py
+ExecReload=/bin/kill -HUP \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=30
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$INSTALL_DIR $LOG_DIR /tmp
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # Reload systemd and enable service
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$SERVICE_NAME"
+    
+    print_success "System service configured and enabled"
+}
+
+# ===== UTILITY SCRIPTS =====
+create_utility_scripts() {
+    print_step "Creating Utility Scripts..."
+    
+    cd "$INSTALL_DIR"
+    
+    # Create quick start script
+    cat > quick_start.sh << 'EOF'
+#!/bin/bash
+# FlowAI-ICT Bot Quick Start Script
+
+echo "🚀 FlowAI-ICT Trading Bot Quick Start"
+echo ""
+
+# Check if configuration is set
+if grep -q "your_bot_token_here" .env 2>/dev/null; then
+    echo "❌ Please configure your bot token in .env file first!"
+    echo "   Edit: $PWD/.env"
+    echo "   Set TELEGRAM_BOT_TOKEN and TELEGRAM_ADMIN_IDS"
+    exit 1
+fi
+
+echo "Starting FlowAI-ICT Bot..."
+sudo systemctl start flowai-ict-bot
+
+echo "Checking status..."
+sleep 3
+sudo systemctl status flowai-ict-bot --no-pager
+
+echo ""
+echo "✅ Bot started! Use './manage.sh logs' to view real-time logs"
+EOF
+    
+    # Create configuration checker
+    cat > check_config.sh << 'EOF'
+#!/bin/bash
+# Configuration Checker Script
+
+echo "🔍 FlowAI-ICT Configuration Checker"
+echo ""
+
+if [[ ! -f ".env" ]]; then
+    echo "❌ Configuration file (.env) not found!"
+    exit 1
+fi
+
+echo "✅ Configuration file found"
+echo ""
+
+# Check critical variables
+echo "📋 Configuration Status:"
+
+check_var() {
+    local var_name="$1"
+    local default_value="$2"
+    
+    if grep -q "^${var_name}=" .env; then
+        local value=$(grep "^${var_name}=" .env | cut -d'=' -f2)
+        if [[ "$value" == "$default_value" ]]; then
+            echo "⚠️  $var_name: Not configured (using default)"
+        else
+            echo "✅ $var_name: Configured"
+        fi
+    else
+        echo "❌ $var_name: Missing"
+    fi
+}
+
+check_var "TELEGRAM_BOT_TOKEN" "your_bot_token_here"
+check_var "TELEGRAM_ADMIN_IDS" "your_user_id_here"
+check_var "BRSAPI_KEY" ""
+check_var "ICT_ENABLED" ""
+check_var "AI_MODEL_ENABLED" ""
+
+echo ""
+echo "🔧 To edit configuration: nano .env"
+EOF
+    
+    # Create log viewer script
+    cat > view_logs.sh << 'EOF'
+#!/bin/bash
+# Log Viewer Script
+
+echo "📋 FlowAI-ICT Log Viewer"
+echo ""
+
+case "$1" in
+    "live"|"")
+        echo "📡 Live logs (Press Ctrl+C to exit):"
+        sudo journalctl -u flowai-ict-bot -f
+        ;;
+    "error")
+        echo "❌ Error logs:"
+        if [[ -f "/var/log/flowai/flowai-errors.log" ]]; then
+            tail -50 /var/log/flowai/flowai-errors.log
+        else
+            echo "No error log file found"
+        fi
+        ;;
+    "install")
+        echo "📦 Installation logs:"
+        if [[ -f "/var/log/flowai/flowai-install.log" ]]; then
+            tail -50 /var/log/flowai/flowai-install.log
+        else
+            echo "No installation log file found"
+        fi
+        ;;
+    "update")
+        echo "🔄 Update logs:"
+        if [[ -f "/var/log/flowai/flowai-update.log" ]]; then
+            tail -50 /var/log/flowai/flowai-update.log
+        else
+            echo "No update log file found"
+        fi
+        ;;
+    *)
+        echo "Usage: $0 [live|error|install|update]"
+        echo ""
+        echo "Options:"
+        echo "  live     - Show live logs (default)"
+        echo "  error    - Show error logs"
+        echo "  install  - Show installation logs"
+        echo "  update   - Show update logs"
+        ;;
+esac
+EOF
+    
+    # Make scripts executable
+    chmod +x quick_start.sh check_config.sh view_logs.sh
+    
+    print_success "Utility scripts created"
+}
+
+# ===== FINAL TESTING =====
+run_final_tests() {
+    print_step "Running Final Tests..."
+    
+    cd "$INSTALL_DIR"
+    source "$VENV_NAME/bin/activate" || error_exit "Failed to activate virtual environment"
+    
+    print_info "Testing Python imports..."
+    python3 -c "
+import sys
+sys.path.insert(0, '.')
+
+try:
+    import pandas as pd
+    import numpy as np
+    import telegram
+    import ta
+    import requests
+    import psutil
+    import aiohttp
+    import schedule
+    print('✓ All critical imports successful')
+    
+    # Test versions
+    print(f'✓ pandas: {pd.__version__}')
+    print(f'✓ numpy: {np.__version__}')
+    print(f'✓ telegram: {telegram.__version__}')
+    print(f'✓ ta: {ta.__version__}')
+    
+except ImportError as e:
+    print(f'✗ Import error: {e}')
+    sys.exit(1)
+except Exception as e:
+    print(f'✗ Unexpected error: {e}')
+    sys.exit(1)
+" || error_exit "Python import tests failed"
+    
+    print_info "Testing configuration loading..."
+    python3 -c "
+import sys
+sys.path.insert(0, '.')
+
+try:
+    from flow_ai_core import config
+    print('✓ Configuration module loaded successfully')
+    
+    # Test critical variables
+    if hasattr(config, 'ICT_SWING_LOOKBACK_PERIODS'):
+        print('✓ ICT variables are available')
+    else:
+        print('⚠ Some ICT variables may be missing')
+        
+except ImportError as e:
+    print(f'✗ Configuration import error: {e}')
+    sys.exit(1)
+except Exception as e:
+    print(f'✗ Configuration error: {e}')
+    sys.exit(1)
+" || print_warning "Configuration test failed (may be normal if config needs setup)"
+    
+    print_info "Testing service configuration..."
+    if sudo systemctl is-enabled "$SERVICE_NAME" &>/dev/null; then
+        print_success "Service is enabled"
+    else
+        print_warning "Service is not enabled"
+    fi
+    
+    print_info "Testing file permissions..."
+    if [[ -r "$INSTALL_DIR/.env" ]] || [[ ! -f "$INSTALL_DIR/.env" ]]; then
+        print_success "Configuration file permissions OK"
+    else
+        print_warning "Configuration file permission issues"
+    fi
+    
+    print_success "All tests completed"
+}
+
+# ===== MAIN INSTALLATION FUNCTION =====
+main() {
+    local install_type
+    local backup_dir=""
+    
+    # Setup logging first
+    setup_logging
+    
+    # Print header
+    print_header
+    
+    # Detect installation type
+    install_type=$(detect_installation_type)
+    
+    case "$install_type" in
+        "fresh")
+            print_info "Fresh installation detected"
+            ;;
+        "update")
+            print_info "Existing installation detected - performing update"
+            ;;
+        "repair")
+            print_info "Incomplete installation detected - performing repair"
+            ;;
+        "reinstall")
+            print_info "Corrupted installation detected - performing reinstall"
+            ;;
+    esac
+    
+    log "INFO" "=== FlowAI-ICT Bot Installation Started (Type: $install_type) ==="
+    
+    # Pre-installation validation
+    check_root_user
+    check_sudo_access
+    check_internet_connectivity
+    check_system_requirements
+    check_python_version
+    check_required_packages
+    
+    # Create backup if updating
+    if [[ "$install_type" == "update" ]] || [[ "$install_type" == "repair" ]]; then
+        backup_dir=$(create_backup "$install_type")
+        stop_existing_service
+    fi
+    
+    # Main installation steps
+    setup_repository
+    setup_virtual_environment
+    install_python_dependencies
+    setup_directory_structure
+    setup_configuration
+    setup_ict_variables
+    fix_circular_imports
+    create_update_script
+    add_telegram_update_handlers
+    create_management_script
+    setup_system_service
+    create_utility_scripts
+    run_final_tests
+    
+    # Restore configuration if this was an update
+    if [[ -n "$backup_dir" ]]; then
+        restore_configuration "$backup_dir"
+    fi
+    
+    # Start the service
+    print_info "Starting FlowAI-ICT Bot service..."
+    sudo systemctl start "$SERVICE_NAME"
+    
+    # Wait a moment and check status
+    sleep 3
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        print_success "Service started successfully"
+    else
+        print_warning "Service may have failed to start - check logs"
+    fi
+    
+    # Cleanup
+    cleanup_old_backups
+    rm -rf "$TEMP_DIR" 2>/dev/null || true
+    
+    # Calculate installation time
+    local end_time=$(date +%s)
+    local duration=$((end_time - START_TIME))
+    local minutes=$((duration / 60))
+    local seconds=$((duration % 60))
+    
+    # Final success message
+    echo ""
+    echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║${NC}                           ${BOLD}🎉 INSTALLATION COMPLETED! 🎉${NC}                          ${GREEN}║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    echo -e "${CYAN}📋 Installation Summary:${NC}"
+    echo "✓ Project installed to: $INSTALL_DIR"
+    echo "✓ Virtual environment created: $VENV_NAME"
+    echo "✓ All dependencies installed with tested versions"
+    echo "✓ Configuration $(if [[ "$install_type" == "update" ]]; then echo "restored from backup"; else echo "created"; fi)"
+    echo "✓ ICT variables added to config.py"
+    echo "✓ Circular import issues fixed"
+    echo "✓ Auto-update system configured"
+    echo "✓ System service configured and enabled"
+    echo "✓ Management and utility scripts created"
+    echo "✓ Installation completed in ${minutes}m ${seconds}s"
+    
+    if [[ -n "$backup_dir" ]]; then
+        echo "✓ Backup created: $backup_dir"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}🚀 Quick Start:${NC}"
+    echo "  sudo systemctl start $SERVICE_NAME"
+    echo "  sudo systemctl status $SERVICE_NAME"
+    echo "  ./manage.sh logs"
+    echo ""
+    
+    echo -e "${CYAN}📊 Management Commands:${NC}"
+    echo "  ./manage.sh start|stop|restart|status|logs|update|backup|restore|health|config"
+    echo "  ./quick_start.sh          # Quick start with checks"
+    echo "  ./check_config.sh         # Verify configuration"
+    echo "  ./view_logs.sh [type]      # View different log types"
+    echo ""
+    
+    echo -e "${CYAN}🔄 Auto-Update Features:${NC}"
+    echo "  Telegram: /update          # Check for updates"
+    echo "  Telegram: /confirm_update  # Apply updates"
+    echo "  Manual: ./manage.sh update # Update via command line"
+    echo ""
+    
+    echo -e "${CYAN}📱 Telegram Bot Commands:${NC}"
+    echo "  /start                     # Start bot and show menu"
+    echo "  /menu                      # Show management menu"
+    echo "  /status                    # Show bot status"
+    echo "  /signals                   # Show trading signals"
+    echo "  /update                    # Check for updates"
+    echo "  /help                      # Show help information"
+    echo ""
+    
+    if [[ "$install_type" == "fresh" ]]; then
+        echo -e "${YELLOW}⚠️  IMPORTANT NEXT STEPS:${NC}"
+        echo "1. Edit configuration file: nano $INSTALL_DIR/.env"
+        echo "2. Set your TELEGRAM_BOT_TOKEN (get from @BotFather)"
+        echo "3. Set your TELEGRAM_ADMIN_IDS (your Telegram user ID)"
+        echo "4. Restart the bot: sudo systemctl restart $SERVICE_NAME"
+        echo "5. Test the bot by sending /start to your Telegram bot"
+        echo ""
+    fi
+    
+    echo -e "${CYAN}📞 Support & Documentation:${NC}"
+    echo "  GitHub: https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot"
+    echo "  Issues: https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot/issues"
+    echo "  Logs: $LOG_DIR/"
+    echo ""
+    
+    echo -e "${GREEN}🎯 FlowAI-ICT Trading Bot v$SCRIPT_VERSION is ready for advanced ICT trading!${NC}"
+    
+    log "INFO" "=== FlowAI-ICT Bot Installation Completed Successfully ==="
+}
+
+# ===== SCRIPT EXECUTION =====
+# Handle script arguments
+case "${1:-}" in
+    "--help"|"-h")
+        echo "FlowAI-ICT Trading Bot Installation Script v$SCRIPT_VERSION"
+        echo ""
+        echo "Usage: $0 [options]"
+        echo ""
+        echo "Options:"
+        echo "  --help, -h     Show this help message"
+        echo "  --debug        Enable debug mode"
+        echo "  --force        Force reinstallation"
+        echo "  --no-service   Skip service setup"
+        echo ""
+        echo "Environment Variables:"
+        echo "  DEBUG=1        Enable debug logging"
+        echo "  FORCE=1        Force reinstallation"
+        echo ""
+        exit 0
+        ;;
+    "--debug")
+        export DEBUG=1
+        shift
+        ;;
+    "--force")
+        export FORCE=1
+        shift
+        ;;
+    "--no-service")
+        export NO_SERVICE=1
+        shift
+        ;;
+esac
+
+# Run main installation
+main "$@"
