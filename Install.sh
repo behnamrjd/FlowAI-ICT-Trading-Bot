@@ -1,4 +1,27 @@
 #!/bin/bash
+# FlowAI-ICT Trading Bot Installation & Management Script
+# Version: 4.0 Enhanced with Auto-Update
+
+# Enhanced error handling
+set -euo pipefail
+
+# Trap for cleanup on exit
+trap 'cleanup_on_error $? $LINENO' ERR
+
+cleanup_on_error() {
+    local exit_code=$1
+    local line_no=$2
+    echo "❌ Error occurred at line $line_no with exit code $exit_code"
+    echo "🧹 Performing cleanup..."
+    
+    # Remove lock files
+    rm -f "$UPDATE_LOCK_FILE" 2>/dev/null || true
+    
+    # Log error
+    echo "$(date): Error at line $line_no, exit code $exit_code" >> "$ERROR_LOG"
+    
+    exit $exit_code
+}
 
 # =====================================================
 # FlowAI-ICT Trading Bot Complete Installer v4.0
