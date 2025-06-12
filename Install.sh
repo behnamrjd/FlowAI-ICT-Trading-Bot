@@ -2112,15 +2112,24 @@ check_prerequisites() {
         print_warning "Running as root - some features may not work as expected"
     fi
     
-    # Check required commands
-    local required_commands=("git" "curl" "systemctl" "pip3")
+    # Check required commands and install if missing
+    local required_commands=("git" "curl" "systemctl")
     for cmd in "${required_commands[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
             error_exit "Required command '$cmd' not found"
         fi
     done
-    print_success "All required commands available"
     
+    # Check pip3 separately and install if missing
+    if ! command -v pip3 &> /dev/null; then
+        print_warning "pip3 not found, installing..."
+        apt update && apt install python3-pip -y || error_exit "Failed to install pip3"
+        print_success "pip3 installed successfully"
+    else
+        print_success "pip3 detected"
+    fi
+    
+    print_success "All required commands available"
     print_success "Pre-flight checks completed"
 }
 
