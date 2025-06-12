@@ -2085,7 +2085,12 @@ check_prerequisites() {
     fi
     
     local python_version=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-    if [[ $(echo "$python_version < 3.8" | bc -l) -eq 1 ]]; then
+    
+    # Check Python version using built-in comparison
+    local major=$(echo "$python_version" | cut -d. -f1)
+    local minor=$(echo "$python_version" | cut -d. -f2)
+    
+    if [[ $major -lt 3 ]] || [[ $major -eq 3 && $minor -lt 8 ]]; then
         error_exit "Python 3.8+ required, found $python_version"
     fi
     print_success "Python $python_version detected"
@@ -2107,7 +2112,7 @@ check_prerequisites() {
         print_warning "Running as root - some features may not work as expected"
     fi
     
-    # Check required commands
+    # Check required commands (removed bc dependency)
     local required_commands=("git" "curl" "systemctl" "pip3")
     for cmd in "${required_commands[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
