@@ -4,7 +4,7 @@ urllib3==1.26.18 # Pinned for stability, as seen in Install.sh
 
 # Data Processing & Analysis
 pandas~=1.5.0 # Compatible release with 1.5
-numpy~=1.21.0 # Compatible release with 1.21
+numpy>=1.23.0 # Use a more recent version compatible with newer Python
 requests~=2.28.0 # Compatible release with 2.28
 joblib~=1.1.0 # For saving/loading AI models or other objects
 
