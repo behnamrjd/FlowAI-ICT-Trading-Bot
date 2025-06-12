@@ -1,5 +1,5 @@
 """
-FlowAI-ICT Core Module v4.0
+FlowAI-ICT Core Module v4.5
 Fixed version without circular imports
 """
 
@@ -7,7 +7,7 @@ Fixed version without circular imports
 from . import config
 
 # Version info
-__version__ = "4.0"
+__version__ = "4.5"
 __author__ = "FlowAI Team"
 
 # Initialize logging
