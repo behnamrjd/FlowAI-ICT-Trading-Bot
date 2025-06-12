@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =====================================================
-# FlowAI-ICT Trading Bot Complete Installer v4.0
+# FlowAI-ICT Trading Bot Complete Installer v4.3
 # Fixed All Issues + Complete Configuration
 # =====================================================
 
@@ -120,7 +120,7 @@ log_success() {
 print_banner() {
     clear
     echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.0                    ${NC}${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.3                    ${NC}${PURPLE}║${NC}"
     if [ "$INSTALLATION_EXISTS" = true ]; then
         echo -e "${PURPLE}║${WHITE}${BOLD}              Management & Status Panel                     ${NC}${PURPLE}║${NC}"
     else
@@ -643,71 +643,12 @@ quick_install() {
     print_step_simple "${steps[5]}" $current $total "running"
     source venv/bin/activate
     
-    # Create fixed requirements.txt
-    cat > requirements.txt << 'EOF'
-python-telegram-bot==13.15
-urllib3==1.26.18
-pandas>=1.5.0,<2.0.0
-numpy>=1.21.0,<2.0.0
-requests>=2.28.0,<3.0.0
-python-dotenv>=0.19.0,<1.0.0
-ta==0.10.2
-jdatetime>=4.1.0,<5.0.0
-pytz>=2022.1
-aiohttp>=3.8.0,<4.0.0
-colorlog>=6.6.0,<7.0.0
-psutil>=5.9.0,<6.0.0
-six
-certifi
-cryptography
-apscheduler<4.0.0
-EOF
-    
-    # Install with specific versions to avoid conflicts
-    local packages=(
-        "python-telegram-bot==13.15"
-        "urllib3==1.26.18"
-        "pandas>=1.5.0,<2.0.0"
-        "numpy>=1.21.0,<2.0.0"
-        "requests>=2.28.0,<3.0.0"
-        "python-dotenv>=0.19.0,<1.0.0"
-        "ta==0.10.2"
-        "jdatetime>=4.1.0,<5.0.0"
-        "pytz>=2022.1"
-        "aiohttp>=3.8.0,<4.0.0"
-        "colorlog>=6.6.0,<7.0.0"
-        "psutil>=5.9.0,<6.0.0"
-        "six"
-        "certifi"
-        "cryptography"
-        "apscheduler<4.0.0"
-    )
-    
-    local failed_packages=()
-    local success_count=0
-    
-    for package in "${packages[@]}"; do
-        local pkg_name=$(echo "$package" | cut -d'=' -f1 | cut -d'>' -f1 | cut -d'<' -f1)
-        echo -e "${CYAN}  Installing $pkg_name...${NC}"
-        
-        if timeout 60s pip install "$package" >/dev/null 2>&1; then
-            echo -e "${GREEN}    ✓ $pkg_name installed${NC}"
-            ((success_count++))
-        else
-            echo -e "${RED}    ✗ $pkg_name failed${NC}"
-            failed_packages+=("$pkg_name")
-        fi
-    done
-    
-    if [ $success_count -gt 12 ]; then
+    if pip install -r requirements.txt; then
         print_step_simple "${steps[5]}" $current $total "success"
-        if [ ${#failed_packages[@]} -gt 0 ]; then
-            print_warning "Some packages failed: ${failed_packages[*]}"
-        fi
     else
         print_step_simple "${steps[5]}" $current $total "error"
-        log_error "Python Dependencies" "Too many packages failed: ${failed_packages[*]}" "pip install" "1"
-        print_warning "Many packages failed but continuing..."
+        log_error "Python Dependencies" "Failed to install from requirements.txt" "pip install -r requirements.txt" "$?"
+        print_warning "Python dependencies installation failed. Continuing, but errors are likely."
     fi
     
     # Step 7: Directory Structure
@@ -778,12 +719,6 @@ EOF
     # Step 9: Code Fixes (NEW)
     ((current++))
     print_step_simple "${steps[8]}" $current $total "running"
-    
-    # Fix import talib to import ta in data_handler.py
-    if [ -f "flow_ai_core/data_handler.py" ]; then
-        sed -i 's/import talib/import ta/g' flow_ai_core/data_handler.py
-        sed -i 's/talib\./ta.trend./g' flow_ai_core/data_handler.py
-    fi
     
     # Ensure telegram_bot.py is in root directory
     if [ -f "flow_ai_core/telegram_bot.py" ] && [ ! -f "telegram_bot.py" ]; then
@@ -957,7 +892,7 @@ if [ -d "venv" ] && [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
     echo "🐍 Python: $(python --version)"
     
-    if python -c "import telegram, pandas, numpy, ta" &>/dev/null; then
+    if "$INSTALL_DIR/venv/bin/python" -c "import telegram, pandas, numpy, ta" &>/dev/null; then
         echo "✅ Dependencies: All OK"
     else
         echo "❌ Dependencies: Some missing"
@@ -1002,7 +937,7 @@ EOF
     local success_imports=()
     
     for import_name in "${critical_imports[@]}"; do
-        if python -c "import $import_name" >/dev/null 2>&1; then
+        if "$INSTALL_DIR/venv/bin/python" -c "import $import_name" >/dev/null 2>&1; then
             success_imports+=("$import_name")
         else
             failed_imports+=("$import_name")
@@ -1010,7 +945,7 @@ EOF
     done
     
     # Test config import
-    if python -c "from flow_ai_core import config; config.validate_config()" >/dev/null 2>&1; then
+    if "$INSTALL_DIR/venv/bin/python" -c "from flow_ai_core import config; config.validate_config()" >/dev/null 2>&1; then
         success_imports+=("config")
     else
         failed_imports+=("config")
@@ -1202,7 +1137,7 @@ manage_service() {
                         local failed_tests=()
                         
                         for import_name in "${test_imports[@]}"; do
-                            if python -c "import $import_name" 2>/dev/null; then
+                            if "$INSTALL_DIR/venv/bin/python" -c "import $import_name" 2>/dev/null; then
                                 echo -e "${GREEN}✅ $import_name: Available${NC}"
                             else
                                 echo -e "${RED}❌ $import_name: Missing${NC}"
@@ -1211,7 +1146,7 @@ manage_service() {
                         done
                         
                         # Test config
-                        if python -c "from flow_ai_core import config; config.validate_config()" 2>/dev/null; then
+                        if "$INSTALL_DIR/venv/bin/python" -c "from flow_ai_core import config; config.validate_config()" 2>/dev/null; then
                             echo -e "${GREEN}✅ Configuration validation passed${NC}"
                         else
                             echo -e "${RED}❌ Configuration validation failed${NC}"
@@ -1470,7 +1405,7 @@ show_system_status() {
     if [ -d "$INSTALL_DIR/venv" ]; then
         cd "$INSTALL_DIR"
         source venv/bin/activate 2>/dev/null
-        if python -c "import telegram, pandas, numpy, ta" &>/dev/null; then
+        if "$INSTALL_DIR/venv/bin/python" -c "import telegram, pandas, numpy, ta" &>/dev/null; then
             echo -e "${GREEN}✅ Dependencies: All OK${NC}"
         else
             echo -e "${YELLOW}⚠ Dependencies: Some issues${NC}"
@@ -1642,3 +1577,5 @@ main() {
 
 # Run main function
 main "$@"
+
+[end of Install.sh]

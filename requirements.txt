@@ -1,42 +1,52 @@
 # Core Telegram Bot
 python-telegram-bot==13.15
+urllib3==1.26.18 # Pinned for stability, as seen in Install.sh
 
 # Data Processing & Analysis
-pandas>=1.5.0
-numpy>=1.21.0
-requests>=2.28.0
+pandas==2.0.3 # Pinned for Python 3.12 compatibility
+numpy>=1.23.0 # Use a more recent version compatible with newer Python
+requests~=2.28.0 # Compatible release with 2.28
+joblib~=1.1.0 # For saving/loading AI models or other objects
 
 # Configuration & Environment
-python-dotenv>=0.19.0
+python-dotenv~=0.19.0 # Compatible release with 0.19
 
-# Technical Analysis (ICT Requirements)
-talib-binary>=0.4.24
-TA-Lib>=0.4.24
+# Technical Analysis
+ta==0.10.2 # Standardized TA library, easier to install
+
+# Scheduling
+schedule~=1.1.0 # For scheduling tasks
 
 # Date & Time Handling
-jdatetime>=4.1.0
-pytz>=2022.1
+jdatetime~=4.1.0 # Compatible release with 4.1
+# pytz~=2022.1 # Compatible release with 2022.1
 
 # Async Support
-asyncio-mqtt>=0.11.1
-aiohttp>=3.8.0
+# asyncio-mqtt>=0.11.1 # Retaining as commented, appears optional
+# aiohttp~=3.8.0 # Compatible release with 3.8 (potentially used by python-telegram-bot)
+# apscheduler<4.0.0 # Pinned for stability, as seen in Install.sh (replaced by schedule)
 
 # Logging & Monitoring
-colorlog>=6.6.0
+# colorlog~=6.6.0 # Compatible release with 6.6
 
 # System Monitoring (Optional)
-psutil>=5.9.0
+psutil~=5.9.0 # Compatible release with 5.9
+
+# Other dependencies from Install.sh for completeness
+six # From Install.sh
+certifi # From Install.sh
+cryptography # From Install.sh
 
 # Database Support (Optional)
 # sqlalchemy>=1.4.0
 
 # Advanced Features (Optional)
-# matplotlib>=3.5.0  # برای نمودارها
-# plotly>=5.10.0     # برای نمودارهای تعاملی
-# redis>=4.3.0       # برای caching پیشرفته
-# scikit-learn>=1.1.0 # برای ML models
+# matplotlib>=3.5.0
+# plotly>=5.10.0
+# redis>=4.3.0
+# scikit-learn~=1.1.0 # For AI/ML features
 
 # Development Tools (Optional)
-# pytest>=7.0.0      # برای تست
-# black>=22.0.0      # برای فرمت کد
-# flake8>=4.0.0      # برای بررسی کد
+# pytest>=7.0.0
+# black>=22.0.0
+# flake8>=4.0.0

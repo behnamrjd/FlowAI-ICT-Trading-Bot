@@ -164,10 +164,12 @@ class FlowAIICTTelegramBot:
             # بررسی وضعیت ICT data handler
             try:
                 test_price = ict_data_handler.get_real_time_price()
-                if test_price > 0:
+                if test_price is not None and test_price > 0:
                     logger.info(f"ICT Data Handler: OK - Price: ${test_price:.2f}")
-                else:
-                    logger.warning("ICT Data Handler: Price data issue")
+                elif test_price is None:
+                    logger.warning("ICT Data Handler: Failed to fetch real-time price (API or other issue).")
+                else: # test_price is 0 or negative
+                    logger.warning(f"ICT Data Handler: Received invalid price data ({test_price}).")
             except Exception as e:
                 logger.error(f"ICT Data Handler health check failed: {e}")
             

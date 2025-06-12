@@ -1,15 +1,16 @@
 import pandas as pd
 import numpy as np
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List, Tuple
+import jdatetime # Added
 from .data_sources.brsapi_fetcher import BrsAPIFetcher
 from .config import (
     HTF_TIMEFRAMES, LTF_TIMEFRAME, ICT_ENABLED,
     ORDER_BLOCK_DETECTION, FAIR_VALUE_GAP_DETECTION,
     LIQUIDITY_SWEEP_DETECTION, ICTConfig
 )
-import talib
+import ta
 
 logger = logging.getLogger(__name__)
 
@@ -25,40 +26,68 @@ class ICTDataHandler:
     def get_processed_data(self, symbol: str = "GOLD", timeframe: str = "1h", limit: int = 1000) -> pd.DataFrame:
         """دریافت و پردازش داده‌های ICT-enhanced"""
         try:
-            logger.info(f"Getting processed data for {symbol} on {timeframe}")
-            
-            # دریافت قیمت real-time از BrsAPI
-            current_price_data = self.brs_fetcher.get_real_time_gold()
-            
-            if not current_price_data:
-                logger.error("Failed to get current price from BrsAPI")
-                return pd.DataFrame()
-            
-            current_price = current_price_data['price']
-            
-            # تولید داده‌های تاریخی (در آینده از BrsAPI historical استفاده خواهیم کرد)
-            data = self._generate_enhanced_historical_data(current_price, timeframe, limit)
-            
+            # Note: 'timeframe' param might be misleading if only daily data is fetched from BrsAPI.
+            logger.info(f"Attempting to fetch REAL DAILY historical data for {symbol} (requested timeframe: {timeframe}, limit: {limit} days).")
+
+            # Calculate Shamsi date range for the API call
+            j_today = jdatetime.date.today()
+            shamsi_date_end_str = j_today.strftime('%Y-%m-%d')
+            # Subtract (limit - 1) because if limit is 1, we want just today.
+            # If limit is 2, we want today and yesterday.
+            j_start_date = j_today - timedelta(days=max(0, limit - 1))
+            shamsi_date_start_str = j_start_date.strftime('%Y-%m-%d')
+            logger.info(f"Calculated Shamsi date range for BrsAPI: {shamsi_date_start_str} to {shamsi_date_end_str}")
+
+            api_symbol_for_historical = "XAUUSD"
+
+            historical_df = self.brs_fetcher.get_daily_historical_gold(
+                symbol=api_symbol_for_historical,
+                date_start=shamsi_date_start_str,
+                date_end=shamsi_date_end_str
+            )
+
+            data: Optional[pd.DataFrame] = None
+
+            if historical_df is not None and not historical_df.empty:
+                logger.info(f"Successfully fetched {len(historical_df)} REAL DAILY historical candles for {symbol} from BrsAPI.")
+                data = historical_df
+                if timeframe != '1d':
+                    logger.warning(f"Requested timeframe was '{timeframe}', but BrsAPI provided DAILY data. Analysis will use daily data.")
+            else:
+                logger.warning(
+                    f"Failed to fetch real daily historical data for {symbol} via BrsAPI. "
+                    f"FALLING BACK TO SYNTHETIC DATA GENERATION. THIS IS NOT SUITABLE FOR LIVE TRADING."
+                )
+                current_price_data = self.brs_fetcher.get_real_time_gold()
+                if not current_price_data or 'price' not in current_price_data:
+                    logger.error("CRITICAL: Failed to get current price from BrsAPI for synthetic data fallback. Cannot proceed.")
+                    return pd.DataFrame()
+
+                current_price = float(current_price_data['price'])
+                # For synthetic data, the original 'timeframe' and 'limit' for candle generation are used.
+                data = self._generate_enhanced_historical_data(current_price, timeframe, limit)
+                if data.empty:
+                     logger.error("Synthetic data generation also failed.")
+                     return pd.DataFrame()
+
             if data.empty:
-                logger.error("No historical data generated")
+                logger.error(f"No data (real or synthetic) available for {symbol}.")
                 return pd.DataFrame()
             
-            # اضافه کردن اندیکاتورهای تکنیکال
             data = self._add_technical_indicators(data)
-            
-            # اضافه کردن تحلیل‌های ICT
             if ICT_ENABLED:
                 data = self._add_ict_analysis(data)
             
-            # ذخیره در cache
-            self.price_history[f"{symbol}_{timeframe}"] = data
-            self.last_update = datetime.now()
+            self.price_history[f"{symbol}_{timeframe}"] = data # Key uses requested timeframe
+            self.last_update = datetime.now(timezone.utc)
             
-            logger.info(f"✅ Processed {len(data)} candles for {symbol} with ICT analysis")
+            logger.info(f"✅ Processed {len(data)} candles for {symbol} (data granularity might be daily if real fetch succeeded).")
             return data
             
         except Exception as e:
             logger.error(f"Error in get_processed_data: {e}")
+            import traceback
+            logger.error(traceback.format_exc()) # Log full traceback
             return pd.DataFrame()
     
     def _generate_enhanced_historical_data(self, current_price: float, timeframe: str, limit: int) -> pd.DataFrame:
@@ -166,48 +195,61 @@ class ICTDataHandler:
     def _add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """اضافه کردن اندیکاتورهای تکنیکال"""
         try:
-            if len(data) < 50:
-                logger.warning("Not enough data for technical indicators")
+            if len(data) < 50: # Increased slightly as some TA-Lib defaults might need more, better safe.
+                logger.warning("Not enough data for full technical indicators calculation using 'ta' library.")
                 return data
             
-            close_prices = data['Close'].values
-            high_prices = data['High'].values
-            low_prices = data['Low'].values
+            # Data columns (e.g., data['Close']) are already pandas Series.
             
             # Moving Averages
-            data['SMA_20'] = talib.SMA(close_prices, timeperiod=20)
-            data['SMA_50'] = talib.SMA(close_prices, timeperiod=50)
-            data['EMA_12'] = talib.EMA(close_prices, timeperiod=12)
-            data['EMA_26'] = talib.EMA(close_prices, timeperiod=26)
+            data['SMA_20'] = ta.trend.SMAIndicator(close=data['Close'], window=20, fillna=True).sma_indicator()
+            data['SMA_50'] = ta.trend.SMAIndicator(close=data['Close'], window=50, fillna=True).sma_indicator()
+            data['EMA_12'] = ta.trend.EMAIndicator(close=data['Close'], window=12, fillna=True).ema_indicator()
+            data['EMA_26'] = ta.trend.EMAIndicator(close=data['Close'], window=26, fillna=True).ema_indicator()
             
             # RSI
-            data['RSI'] = talib.RSI(close_prices, timeperiod=14)
+            data['RSI'] = ta.momentum.RSIIndicator(close=data['Close'], window=14, fillna=True).rsi()
             
             # MACD
-            macd, macd_signal, macd_hist = talib.MACD(close_prices)
-            data['MACD'] = macd
-            data['MACD_Signal'] = macd_signal
-            data['MACD_Histogram'] = macd_hist
+            macd_indicator = ta.trend.MACD(close=data['Close'], window_slow=26, window_fast=12, window_sign=9, fillna=True)
+            data['MACD'] = macd_indicator.macd()
+            data['MACD_Signal'] = macd_indicator.macd_signal()
+            data['MACD_Histogram'] = macd_indicator.macd_diff() # Or (data['MACD'] - data['MACD_Signal'])
             
             # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = talib.BBANDS(close_prices)
-            data['BB_Upper'] = bb_upper
-            data['BB_Middle'] = bb_middle
-            data['BB_Lower'] = bb_lower
-            
-            # Stochastic
-            stoch_k, stoch_d = talib.STOCH(high_prices, low_prices, close_prices)
-            data['Stoch_K'] = stoch_k
-            data['Stoch_D'] = stoch_d
-            
-            # ATR
-            data['ATR'] = talib.ATR(high_prices, low_prices, close_prices, timeperiod=14)
-            
-            logger.debug("Technical indicators added successfully")
+            bb_indicator = ta.volatility.BollingerBands(close=data['Close'], window=20, window_dev=2, fillna=True)
+            data['BB_Upper'] = bb_indicator.bollinger_hband()
+            data['BB_Middle'] = bb_indicator.bollinger_mavg()
+            data['BB_Lower'] = bb_indicator.bollinger_lband()
+
+            # Stochastic Oscillator
+            stoch_indicator = ta.momentum.StochasticOscillator(
+                high=data['High'],
+                low=data['Low'],
+                close=data['Close'],
+                window=14,
+                smooth_window=3,
+                fillna=True
+            )
+            data['Stoch_K'] = stoch_indicator.stoch()
+            data['Stoch_D'] = stoch_indicator.stoch_signal()
+
+            # ATR (Average True Range)
+            data['ATR'] = ta.volatility.AverageTrueRange(
+                high=data['High'],
+                low=data['Low'],
+                close=data['Close'],
+                window=14,
+                fillna=True
+            ).average_true_range()
+
+            logger.debug("Technical indicators added successfully using 'ta' library class-based interface.")
             return data
             
         except Exception as e:
-            logger.error(f"Error adding technical indicators: {e}")
+            logger.error(f"Error adding technical indicators using 'ta' library: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return data
     
     def _add_ict_analysis(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -422,14 +464,22 @@ class ICTDataHandler:
             logger.error(f"Error analyzing market structure: {e}")
             return data
     
-    def get_real_time_price(self) -> float:
-        """دریافت قیمت real-time"""
+    def get_real_time_price(self) -> Optional[float]:
+        """
+        دریافت قیمت real-time.
+        Returns:
+            Optional[float]: The real-time price as a float, or None if fetching fails or data is invalid.
+        """
         try:
             price_data = self.brs_fetcher.get_real_time_gold()
-            return price_data['price'] if price_data else 3325.0
+            if price_data and 'price' in price_data:
+                return float(price_data['price'])
+            else:
+                logger.warning("Failed to get valid price data from BrsAPIFetcher.")
+                return None
         except Exception as e:
             logger.error(f"Error getting real-time price: {e}")
-            return 3325.0
+            return None
     
     def get_ict_signals(self, data: pd.DataFrame) -> Dict:
         """استخراج سیگنال‌های ICT"""

@@ -1,6 +1,11 @@
 import requests
 import logging
 from datetime import datetime
+from typing import Optional, Dict, Any # Added Dict, Any
+import pandas as pd
+import numpy as np # Added
+import jdatetime # Added
+from ..config import USD_IRR_EXCHANGE_RATE
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +129,7 @@ class BrsAPIFetcher:
             if 'IR_GOLD_18K' in item.get('symbol', ''):
                 try:
                     price_rial = float(item.get('price', 0))
-                    price_usd = price_rial / 70000  # تبدیل به دلار
+                    price_usd = price_rial / USD_IRR_EXCHANGE_RATE  # تبدیل به دلار
                     
                     result = {
                         'price': price_usd,
@@ -148,6 +153,87 @@ class BrsAPIFetcher:
         
         logger.warning("No usable gold data found in BrsAPI response")
         return None
+
+    def get_daily_historical_gold(self, symbol: str, date_start: Optional[str] = None, date_end: Optional[str] = None) -> Optional[pd.DataFrame]:
+        """
+        Fetches daily historical OHLC data for the given symbol (e.g., XAUUSD) from BrsAPI.
+        Dates are expected in Shamsi 'YYYY-MM-DD' format for the API query.
+        Returns a pandas DataFrame with Gregorian Timestamps as index and OHLCV columns.
+        Volume data is not provided by this API endpoint and will be set to 0.
+        """
+        params: Dict[str, Any] = {
+            'key': self.api_key,
+            'section': 'gold',
+            'symbol': symbol,
+            'history': '2'
+        }
+        if date_start:
+            params['date_start'] = date_start # Shamsi YYYY-MM-DD
+        if date_end:
+            params['date_end'] = date_end # Shamsi YYYY-MM-DD
+
+        logger.info(f"Attempting to fetch daily historical data from BrsAPI with params: {params}")
+        data = self._make_request(params)
+
+        if not data or not isinstance(data, dict):
+            logger.error(f"Failed to fetch or received invalid data from BrsAPI for daily historical data. Params: {params}")
+            return None
+
+        if not data.get('successful'):
+            logger.error(f"BrsAPI daily historical data request not successful: {data.get('message_error', 'Unknown error')}. Params: {params}")
+            return None
+
+        ohlcv_list = data.get('history_daily')
+
+        if not ohlcv_list or not isinstance(ohlcv_list, list):
+            logger.error(f"Daily historical data format from BrsAPI is not as expected (missing 'history_daily' list or not a list). Response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+            return None
+
+        processed_candles = []
+        for candle_data in ohlcv_list:
+            if not isinstance(candle_data, dict):
+                logger.warning(f"Skipping invalid daily candle data item (not a dict): {candle_data}")
+                continue
+            try:
+                shamsi_date_str = candle_data.get('date')
+                if not shamsi_date_str:
+                    logger.warning(f"Missing 'date' in daily candle data: {candle_data}")
+                    continue
+
+                try:
+                    year, month, day = map(int, shamsi_date_str.split('/'))
+                    jdate = jdatetime.date(year, month, day)
+                    gregorian_date = jdate.togregorian()
+                    ts = pd.Timestamp(gregorian_date)
+                except Exception as date_conv_err:
+                    logger.warning(f"Error converting Shamsi date '{shamsi_date_str}': {date_conv_err} from candle: {candle_data}")
+                    continue
+
+                processed_candles.append({
+                    'Timestamp': ts,
+                    'Open': float(candle_data.get('open', 0.0)),
+                    'High': float(candle_data.get('high', 0.0)),
+                    'Low': float(candle_data.get('low', 0.0)),
+                    'Close': float(candle_data.get('close', 0.0)),
+                    'Volume': 0.0 # Volume not provided by this endpoint
+                })
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error processing daily candle data contents {candle_data}: {e}")
+                continue
+
+        if not processed_candles:
+            logger.error("No valid daily historical candles could be processed from BrsAPI response, though data was received.")
+            return None
+
+        df = pd.DataFrame(processed_candles)
+        if df.empty:
+            logger.error("Resulting DataFrame is empty after processing daily candles.")
+            return None
+
+        df = df.set_index('Timestamp')
+        df = df.sort_index()
+        logger.info(f"Successfully processed {len(df)} daily historical candles for {symbol} from BrsAPI.")
+        return df
 
 # Global instance
 brs_fetcher = BrsAPIFetcher()

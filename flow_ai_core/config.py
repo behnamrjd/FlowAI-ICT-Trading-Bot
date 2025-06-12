@@ -38,17 +38,29 @@ def get_env_var(key: str, default: Union[str, int, float, bool] = None, var_type
 
 # ===== TELEGRAM CONFIGURATION =====
 TELEGRAM_BOT_TOKEN = get_env_var('TELEGRAM_BOT_TOKEN')
-TELEGRAM_ADMIN_IDS = get_env_var('TELEGRAM_ADMIN_IDS', '262182607', var_type=list)
-TELEGRAM_PREMIUM_USERS = get_env_var('TELEGRAM_PREMIUM_USERS', '', var_type=list)
+TELEGRAM_ADMIN_IDS_RAW = get_env_var('TELEGRAM_ADMIN_IDS', '', var_type=list)
+TELEGRAM_PREMIUM_USERS_RAW = get_env_var('TELEGRAM_PREMIUM_USERS', '', var_type=list)
 
-# تبدیل به integer
-try:
-    TELEGRAM_ADMIN_IDS = [int(id_str) for id_str in TELEGRAM_ADMIN_IDS if id_str.strip()]
-    TELEGRAM_PREMIUM_USERS = [int(id_str) for id_str in TELEGRAM_PREMIUM_USERS if id_str.strip()]
-except ValueError:
-    logger.warning("Invalid admin or premium user IDs in config")
-    TELEGRAM_ADMIN_IDS = [262182607]  # fallback به ID شما
-    TELEGRAM_PREMIUM_USERS = []
+TELEGRAM_ADMIN_IDS = []
+TELEGRAM_PREMIUM_USERS = []
+_admin_ids_conversion_error = False
+
+# تبدیل به integer برای Admin IDs
+if TELEGRAM_ADMIN_IDS_RAW: # فقط اگر رشته خالی نباشد تلاش کن
+    try:
+        TELEGRAM_ADMIN_IDS = [int(id_str) for id_str in TELEGRAM_ADMIN_IDS_RAW if id_str.strip()]
+    except ValueError:
+        logger.error("Invalid format for TELEGRAM_ADMIN_IDS in .env file. Expected comma-separated integers.")
+        _admin_ids_conversion_error = True
+        # TELEGRAM_ADMIN_IDS will remain empty as initialized
+
+# تبدیل به integer برای Premium Users
+if TELEGRAM_PREMIUM_USERS_RAW: # فقط اگر رشته خالی نباشد تلاش کن
+    try:
+        TELEGRAM_PREMIUM_USERS = [int(id_str) for id_str in TELEGRAM_PREMIUM_USERS_RAW if id_str.strip()]
+    except ValueError:
+        logger.warning("Invalid format for TELEGRAM_PREMIUM_USERS in .env file. Expected comma-separated integers. Premium users list will be empty.")
+        TELEGRAM_PREMIUM_USERS = [] # Ensure it's empty on error
 
 # ===== BRSAPI CONFIGURATION =====
 BRSAPI_KEY = get_env_var('BRSAPI_KEY', 'FreeQZdOYW6D3nNv95jZ9BcYXJHzTJpf')
@@ -72,7 +84,8 @@ ICT_MAX_DAILY_RISK = get_env_var('ICT_MAX_DAILY_RISK', 0.05, var_type=float)  # 
 ICT_RR_RATIO = get_env_var('ICT_RR_RATIO', 2.0, var_type=float)  # 1:2 Risk/Reward
 
 # ===== AI MODEL CONFIGURATION =====
-AI_MODEL_ENABLED = get_env_var('AI_MODEL_ENABLED', True, var_type=bool)
+# Defaulting to False as model.pkl is not currently in use or provided.
+AI_MODEL_ENABLED = get_env_var('AI_MODEL_ENABLED', False, var_type=bool)
 AI_MODEL_PATH = get_env_var('AI_MODEL_PATH', 'models/flowai_model.pkl')
 AI_CONFIDENCE_THRESHOLD = get_env_var('AI_CONFIDENCE_THRESHOLD', 0.7, var_type=float)
 AI_RETRAIN_INTERVAL = get_env_var('AI_RETRAIN_INTERVAL', 24, var_type=int)  # hours
@@ -107,6 +120,9 @@ MAX_POSITION_SIZE_PERCENT = get_env_var('MAX_POSITION_SIZE_PERCENT', 10.0, var_t
 MAX_DRAWDOWN_PERCENT = get_env_var('MAX_DRAWDOWN_PERCENT', 15.0, var_type=float)
 MAX_DAILY_TRADES = get_env_var('MAX_DAILY_TRADES', 20, var_type=int)
 
+# ===== FINANCIAL DATA CONFIGURATION =====
+USD_IRR_EXCHANGE_RATE = get_env_var('USD_IRR_EXCHANGE_RATE', 70000.0, var_type=float)
+
 # ===== NOTIFICATION CONFIGURATION =====
 NOTIFICATIONS_ENABLED = get_env_var('NOTIFICATIONS_ENABLED', True, var_type=bool)
 EMAIL_NOTIFICATIONS = get_env_var('EMAIL_NOTIFICATIONS', False, var_type=bool)
@@ -138,6 +154,16 @@ MAX_WORKERS = get_env_var('MAX_WORKERS', 4, var_type=int)
 DEBUG_MODE = get_env_var('DEBUG_MODE', False, var_type=bool)
 TESTING_MODE = get_env_var('TESTING_MODE', False, var_type=bool)
 PAPER_TRADING = get_env_var('PAPER_TRADING', True, var_type=bool)
+
+# ===== NEWS HANDLING CONFIGURATION =====
+NEWS_FETCH_URL = get_env_var('NEWS_FETCH_URL', 'https://nfs.faireconomy.media/ff_calendar_thisweek.json', var_type=str)
+# Comma-separated list, e.g., "USD,EUR"
+NEWS_MONITORED_CURRENCIES = get_env_var('NEWS_MONITORED_CURRENCIES', 'USD', var_type=list)
+# Comma-separated, e.g., "High,Medium,Low"
+NEWS_MONITORED_IMPACTS = get_env_var('NEWS_MONITORED_IMPACTS', 'High,Medium', var_type=list)
+NEWS_BLACKOUT_MINUTES_BEFORE = get_env_var('NEWS_BLACKOUT_MINUTES_BEFORE', 30, var_type=int)
+NEWS_BLACKOUT_MINUTES_AFTER = get_env_var('NEWS_BLACKOUT_MINUTES_AFTER', 60, var_type=int)
+NEWS_CACHE_TTL_SECONDS = get_env_var('NEWS_CACHE_TTL_SECONDS', 3600, var_type=int) # 1 hour
 
 # ===== ICT SPECIFIC CONFIGURATIONS =====
 class ICTConfig:
@@ -174,10 +200,12 @@ def validate_config():
     errors = []
     
     if not TELEGRAM_BOT_TOKEN:
-        errors.append("TELEGRAM_BOT_TOKEN is required")
-    
-    if not TELEGRAM_ADMIN_IDS:
-        errors.append("TELEGRAM_ADMIN_IDS is required")
+        errors.append("TELEGRAM_BOT_TOKEN is required and cannot be empty.")
+
+    if _admin_ids_conversion_error:
+        errors.append("TELEGRAM_ADMIN_IDS contains invalid non-integer values. Please check .env file.")
+    elif not TELEGRAM_ADMIN_IDS: # This condition implies TELEGRAM_ADMIN_IDS_RAW was empty or all its elements were empty strings, and no conversion error occurred.
+        errors.append("TELEGRAM_ADMIN_IDS is required and cannot be empty. Please set at least one admin ID in .env file.")
     
     if not BRSAPI_KEY:
         errors.append("BRSAPI_KEY is required")
@@ -190,6 +218,23 @@ def validate_config():
     
     if ICT_RISK_PER_TRADE <= 0 or ICT_RISK_PER_TRADE > 0.1:
         errors.append("ICT_RISK_PER_TRADE must be between 0 and 0.1 (10%)")
+
+    if USD_IRR_EXCHANGE_RATE <= 0:
+        errors.append("USD_IRR_EXCHANGE_RATE must be a positive number.")
+
+    # News Handling Validation
+    if not NEWS_FETCH_URL:
+        errors.append("NEWS_FETCH_URL is required.")
+    if not NEWS_MONITORED_CURRENCIES:
+        errors.append("NEWS_MONITORED_CURRENCIES cannot be empty if news handling is active.")
+    if not NEWS_MONITORED_IMPACTS:
+        errors.append("NEWS_MONITORED_IMPACTS cannot be empty if news handling is active.")
+    if NEWS_BLACKOUT_MINUTES_BEFORE < 0:
+        errors.append("NEWS_BLACKOUT_MINUTES_BEFORE cannot be negative.")
+    if NEWS_BLACKOUT_MINUTES_AFTER < 0:
+        errors.append("NEWS_BLACKOUT_MINUTES_AFTER cannot be negative.")
+    if NEWS_CACHE_TTL_SECONDS <= 0:
+        errors.append("NEWS_CACHE_TTL_SECONDS must be positive.")
     
     if errors:
         for error in errors:
@@ -211,3 +256,8 @@ logger.info(f"ICT Strategy: {'Enabled' if ICT_ENABLED else 'Disabled'}")
 logger.info(f"AI Model: {'Enabled' if AI_MODEL_ENABLED else 'Disabled'}")
 logger.info(f"Admin IDs: {TELEGRAM_ADMIN_IDS}")
 logger.info(f"Premium Users: {len(TELEGRAM_PREMIUM_USERS)}")
+
+if USD_IRR_EXCHANGE_RATE == 70000.0 and not os.getenv('USD_IRR_EXCHANGE_RATE'):
+    logger.warning("Using default USD_IRR_EXCHANGE_RATE of 70000.0. "
+                     "Please set USD_IRR_EXCHANGE_RATE in your .env file for accurate "
+                     "18K Gold price conversion if XAUUSD is unavailable.")
