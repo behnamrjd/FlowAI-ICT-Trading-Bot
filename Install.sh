@@ -2026,10 +2026,57 @@ EOF
     print_success "Management script created"
 }
 
+# Pre-flight system checks
+check_prerequisites() {
+    print_step "Running pre-flight checks..."
+    
+    # Check Python version
+    if ! command -v python3 &> /dev/null; then
+        error_exit "Python3 is not installed"
+    fi
+    
+    local python_version=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+    if [[ $(echo "$python_version < 3.8" | bc -l) -eq 1 ]]; then
+        error_exit "Python 3.8+ required, found $python_version"
+    fi
+    print_success "Python $python_version detected"
+    
+    # Check disk space (minimum 1GB)
+    local available_space=$(df /opt 2>/dev/null | awk 'NR==2 {print $4}' || echo "1000000")
+    if [[ $available_space -lt 1000000 ]]; then
+        print_warning "Low disk space detected: $(($available_space/1024))MB available"
+    fi
+    
+    # Check internet connectivity
+    if ! ping -c 1 google.com &> /dev/null && ! ping -c 1 8.8.8.8 &> /dev/null; then
+        error_exit "No internet connectivity detected"
+    fi
+    print_success "Internet connectivity verified"
+    
+    # Check if running as root
+    if [[ $EUID -eq 0 ]]; then
+        print_warning "Running as root - some features may not work as expected"
+    fi
+    
+    # Check required commands
+    local required_commands=("git" "curl" "systemctl" "pip3")
+    for cmd in "${required_commands[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            error_exit "Required command '$cmd' not found"
+        fi
+    done
+    print_success "All required commands available"
+    
+    print_success "Pre-flight checks completed"
+}
+
 # Main execution
 main() {
     # Initialize logging first
     init_logs
+    
+    # Run pre-flight checks
+    check_prerequisites
     
     # Log startup
     echo "FlowAI-ICT Installation/Management Log v4.0 - $(date)" > "$LOG_FILE"
