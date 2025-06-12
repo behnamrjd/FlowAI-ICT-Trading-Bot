@@ -1684,15 +1684,23 @@ LOG_FILE="/var/log/flowai-update.log"
 BACKUP_DIR="/tmp/flowai-backup-$(date +%Y%m%d-%H%M%S)"
 LOCK_FILE="/tmp/flowai_update.lock"
 
+# Create log directory and file with proper permissions
+sudo mkdir -p /var/log
+sudo touch "$LOG_FILE"
+sudo chmod 666 "$LOG_FILE"
+
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE" 2>/dev/null || echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
 }
 
 error_exit() {
-    echo "ERROR: $1" | tee -a "$LOG_FILE"
+    echo "ERROR: $1" | tee -a "$LOG_FILE" 2>/dev/null || echo "ERROR: $1"
     rm -f "$LOCK_FILE"
     exit 1
 }
+
+# Remove old lock file if exists
+rm -f "$LOCK_FILE"
 
 # Check if update is already running
 if [[ -f "$LOCK_FILE" ]]; then
