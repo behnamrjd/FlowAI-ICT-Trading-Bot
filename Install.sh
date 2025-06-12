@@ -2112,7 +2112,7 @@ check_prerequisites() {
         print_warning "Running as root - some features may not work as expected"
     fi
     
-    # Check required commands (removed bc dependency)
+    # Check required commands
     local required_commands=("git" "curl" "systemctl" "pip3")
     for cmd in "${required_commands[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
