@@ -1680,32 +1680,24 @@ set -e
 
 BOT_DIR="/opt/FlowAI-ICT-Trading-Bot"
 SERVICE_NAME="flowai-ict-bot"
-LOG_FILE="/var/log/flowai-update.log"
+LOG_FILE="/tmp/flowai-update.log"
 BACKUP_DIR="/tmp/flowai-backup-$(date +%Y%m%d-%H%M%S)"
 LOCK_FILE="/tmp/flowai_update.lock"
 
-# Create log directory and file with proper permissions
-sudo mkdir -p /var/log
-sudo touch "$LOG_FILE"
-sudo chmod 666 "$LOG_FILE"
-
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE" 2>/dev/null || echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
 }
 
 error_exit() {
-    echo "ERROR: $1" | tee -a "$LOG_FILE" 2>/dev/null || echo "ERROR: $1"
+    echo "ERROR: $1" | tee -a "$LOG_FILE"
     rm -f "$LOCK_FILE"
     exit 1
 }
 
-# Remove old lock file if exists
+# Force remove any existing lock file
 rm -f "$LOCK_FILE"
 
-# Check if update is already running
-if [[ -f "$LOCK_FILE" ]]; then
-    error_exit "Update is already running"
-fi
+# Create new lock file
 echo $$ > "$LOCK_FILE"
 
 log "=== FlowAI-ICT Bot Update Started ==="
@@ -1714,6 +1706,7 @@ log "=== FlowAI-ICT Bot Update Started ==="
 mkdir -p "$BACKUP_DIR"
 if [[ -f "$BOT_DIR/.env" ]]; then
     cp "$BOT_DIR/.env" "$BACKUP_DIR/.env" || error_exit "Failed to backup .env"
+    log "Configuration backed up"
 fi
 
 # Stop service
@@ -1725,26 +1718,39 @@ log "Updating code..."
 cd "$BOT_DIR" || error_exit "Cannot access bot directory"
 git fetch origin main || error_exit "Failed to fetch updates"
 git reset --hard origin/main || error_exit "Failed to update code"
+log "Code updated successfully"
 
 # Restore configuration
 if [[ -f "$BACKUP_DIR/.env" ]]; then
     cp "$BACKUP_DIR/.env" "$BOT_DIR/.env" || error_exit "Failed to restore config"
+    log "Configuration restored"
 fi
 
 # Update dependencies
 log "Updating dependencies..."
 source venv/bin/activate || error_exit "Failed to activate venv"
+pip install --upgrade pip
 pip install numpy==1.26.4 pandas==2.0.3 python-telegram-bot==13.15 ta==0.10.2 urllib3==1.26.18 --upgrade
+log "Dependencies updated"
 
 # Start service
 log "Starting bot service..."
 sudo systemctl start "$SERVICE_NAME" || error_exit "Failed to start service"
 
+# Wait for service to start
+sleep 5
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+    log "Bot service started successfully"
+else
+    error_exit "Service failed to start"
+fi
+
 # Cleanup
 rm -f "$LOCK_FILE"
 find /tmp -name "flowai-backup-*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
 
-log "=== FlowAI-ICT Bot Update Completed ==="
+log "=== FlowAI-ICT Bot Update Completed Successfully ==="
+echo "✅ Update completed! Bot is running with latest version."
 EOF
     
     chmod +x "$UPDATE_SCRIPT_PATH"
