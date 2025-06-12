@@ -1517,6 +1517,7 @@ perform_health_check() {
     else
         echo -e "ℹ️  No error log file found"
     fi
+EOF
 }
 
 show_config_status() {
