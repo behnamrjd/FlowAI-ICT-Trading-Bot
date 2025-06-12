@@ -1,23 +1,19 @@
 """
-FlowAI ICT Trading Bot Core Module
-Advanced AI-Powered Gold Trading System
+FlowAI-ICT Core Module v4.0
+Fixed version without circular imports
 """
 
-__version__ = "2.0.0"
-__author__ = "Behnam RJD"
-__description__ = "FlowAI XAU Trading Bot - Advanced AI-Powered Gold Trading System"
-
-# Core modules
+# Import only essential modules without circular dependencies
 from . import config
-from . import data_handler
-from . import ict_analysis
-from . import telegram_bot
-from . import utils
 
-__all__ = [
-    'config',
-    'data_handler', 
-    'ict_analysis',
-    'telegram_bot',
-    'utils'
-]
+# Version info
+__version__ = "4.0"
+__author__ = "FlowAI Team"
+
+# Initialize logging
+import logging
+logger = logging.getLogger(__name__)
+logger.info("FlowAI-ICT Core Module initialized")
+
+# DO NOT import telegram_bot here - causes circular import
+# All telegram functionality is handled in the main telegram_bot.py file
