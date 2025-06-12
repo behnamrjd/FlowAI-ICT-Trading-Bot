@@ -2112,7 +2112,7 @@ check_prerequisites() {
         print_warning "Running as root - some features may not work as expected"
     fi
     
-    # Check required commands and install if missing
+    # Check required commands
     local required_commands=("git" "curl" "systemctl")
     for cmd in "${required_commands[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
@@ -2120,13 +2120,23 @@ check_prerequisites() {
         fi
     done
     
-    # Check pip3 separately and install if missing
-    if ! command -v pip3 &> /dev/null; then
-        print_warning "pip3 not found, installing..."
-        apt update && apt install python3-pip -y || error_exit "Failed to install pip3"
-        print_success "pip3 installed successfully"
-    else
+    # Check pip3 with multiple methods and fallbacks
+    if command -v pip3 &> /dev/null; then
         print_success "pip3 detected"
+    elif command -v pip &> /dev/null; then
+        print_success "pip detected (will use as pip3)"
+    elif python3 -m pip --version &> /dev/null; then
+        print_success "pip module detected (will use python3 -m pip)"
+    else
+        print_warning "pip3 not found, installing..."
+        if apt update && apt install python3-pip -y; then
+            print_success "pip3 installed successfully"
+        else
+            print_warning "Failed to install pip3, will use python3 -m pip"
+            if ! python3 -m pip --version &> /dev/null; then
+                error_exit "No pip installation method available"
+            fi
+        fi
     fi
     
     print_success "All required commands available"
