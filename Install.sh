@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =====================================================
-# FlowAI-ICT Trading Bot Complete Installer v4.0
+# FlowAI-ICT Trading Bot Complete Installer v4.2
 # Fixed All Issues + Complete Configuration
 # =====================================================
 
@@ -120,7 +120,7 @@ log_success() {
 print_banner() {
     clear
     echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.0                    ${NC}${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.2                    ${NC}${PURPLE}║${NC}"
     if [ "$INSTALLATION_EXISTS" = true ]; then
         echo -e "${PURPLE}║${WHITE}${BOLD}              Management & Status Panel                     ${NC}${PURPLE}║${NC}"
     else
@@ -1577,3 +1577,5 @@ main() {
 
 # Run main function
 main "$@"
+
+[end of Install.sh]
