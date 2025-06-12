@@ -69,29 +69,27 @@ MAX_BACKUPS=5
 
 # Initialize log files with proper permissions
 init_logs() {
-    mkdir -p "$USER_HOME" 2>/dev/null
+    # Create log files with proper permissions
+    touch "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG" 2>/dev/null || {
+        echo "⚠️ Warning: Could not create log files in /tmp, using current directory"
+        LOG_FILE="./flowai-install.log"
+        ERROR_LOG="./flowai-errors.log"
+        UPDATE_LOG="./flowai-update.log"
+        touch "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG"
+    }
     
-    if touch "$LOG_FILE" 2>/dev/null; then
-        chmod 644 "$LOG_FILE" 2>/dev/null
-    else
-        LOG_FILE="/tmp/flowai_install_$(date +%s).log"
-        touch "$LOG_FILE"
-    fi
+    # Initialize log files
+    echo "=== FlowAI-ICT Installation Log Started: $(date) ===" > "$LOG_FILE"
+    echo "=== FlowAI-ICT Error Log Started: $(date) ===" > "$ERROR_LOG"
+    echo "=== FlowAI-ICT Update Log Started: $(date) ===" > "$UPDATE_LOG"
     
-    if touch "$ERROR_LOG" 2>/dev/null; then
-        chmod 644 "$ERROR_LOG" 2>/dev/null
-    else
-        ERROR_LOG="/tmp/flowai_errors_$(date +%s).log"
-        touch "$ERROR_LOG"
-    fi
+    # Set proper permissions
+    chmod 644 "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG" 2>/dev/null || true
     
-    ERROR_COUNT=0
-    if [ -f "$ERROR_LOG" ]; then
-        local count=$(grep -c "ERROR #" "$ERROR_LOG" 2>/dev/null || echo "0")
-        if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ]; then
-            ERROR_COUNT=$count
-        fi
-    fi
+    echo "📝 Log files initialized:"
+    echo "   Install: $LOG_FILE"
+    echo "   Errors:  $ERROR_LOG"
+    echo "   Updates: $UPDATE_LOG"
 }
 
 # Check if installation exists
