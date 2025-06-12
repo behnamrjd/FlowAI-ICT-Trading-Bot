@@ -1561,15 +1561,56 @@ management_menu() {
                 wait_for_input
                 ;;
             5)
-                echo -e "${CYAN}🔄 Update Bot to Latest Version${NC}"
+                echo -e "${CYAN}🔄 Auto-Update Bot to Latest Version${NC}"
                 echo ""
-                echo -e "${WHITE}Manual update steps:${NC}"
-                echo -e "${CYAN}1. Stop bot: sudo systemctl stop flowai-ict-bot${NC}"
-                echo -e "${CYAN}2. Backup config: cp $INSTALL_DIR/.env /tmp/.env.backup${NC}"
-                echo -e "${CYAN}3. Update code: cd $INSTALL_DIR && git pull${NC}"
-                echo -e "${CYAN}4. Restore config: cp /tmp/.env.backup $INSTALL_DIR/.env${NC}"
-                echo -e "${CYAN}5. Update deps: source venv/bin/activate && pip install -r requirements.txt --upgrade${NC}"
-                echo -e "${CYAN}6. Start bot: sudo systemctl start flowai-ict-bot${NC}"
+                echo -e "${WHITE}Checking for updates...${NC}"
+                
+                # Check if auto-update script exists
+                if [ -f "$INSTALL_DIR/scripts/update_bot.sh" ]; then
+                    echo -e "${GREEN}✓ Auto-update system available${NC}"
+                    echo ""
+                    echo -e "${YELLOW}Choose update method:${NC}"
+                    echo -e "${WHITE}1) Auto-Update (Recommended)${NC}"
+                    echo -e "${WHITE}2) Manual Update Steps${NC}"
+                    echo -e "${WHITE}3) Cancel${NC}"
+                    echo ""
+                    read -p "Enter choice (1-3): " update_choice
+                    
+                    case $update_choice in
+                        1)
+                            echo -e "${CYAN}🔄 Starting auto-update...${NC}"
+                            echo -e "${YELLOW}⚠️ Bot will restart automatically${NC}"
+                            echo ""
+                            cd "$INSTALL_DIR"
+                            bash scripts/update_bot.sh
+                            ;;
+                        2)
+                            echo -e "${CYAN}📋 Manual update steps:${NC}"
+                            echo -e "${WHITE}1. Stop bot: sudo systemctl stop flowai-ict-bot${NC}"
+                            echo -e "${WHITE}2. Backup config: cp $INSTALL_DIR/.env /tmp/.env.backup${NC}"
+                            echo -e "${WHITE}3. Update code: cd $INSTALL_DIR && git pull${NC}"
+                            echo -e "${WHITE}4. Restore config: cp /tmp/.env.backup $INSTALL_DIR/.env${NC}"
+                            echo -e "${WHITE}5. Update deps: source venv/bin/activate && pip install -r requirements.txt --upgrade${NC}"
+                            echo -e "${WHITE}6. Start bot: sudo systemctl start flowai-ict-bot${NC}"
+                            ;;
+                        3)
+                            echo -e "${YELLOW}Update cancelled${NC}"
+                            ;;
+                        *)
+                            echo -e "${RED}Invalid choice${NC}"
+                            ;;
+                    esac
+                else
+                    echo -e "${YELLOW}⚠️ Auto-update not available${NC}"
+                    echo ""
+                    echo -e "${CYAN}📋 Manual update steps:${NC}"
+                    echo -e "${WHITE}1. Stop bot: sudo systemctl stop flowai-ict-bot${NC}"
+                    echo -e "${WHITE}2. Backup config: cp $INSTALL_DIR/.env /tmp/.env.backup${NC}"
+                    echo -e "${WHITE}3. Update code: cd $INSTALL_DIR && git pull${NC}"
+                    echo -e "${WHITE}4. Restore config: cp /tmp/.env.backup $INSTALL_DIR/.env${NC}"
+                    echo -e "${WHITE}5. Update deps: source venv/bin/activate && pip install -r requirements.txt --upgrade${NC}"
+                    echo -e "${WHITE}6. Start bot: sudo systemctl start flowai-ict-bot${NC}"
+                fi
                 wait_for_input
                 ;;
             6)
@@ -1590,10 +1631,16 @@ management_menu() {
                 echo -e "${WHITE}• sudo systemctl status flowai-ict-bot${NC}"
                 echo -e "${WHITE}• sudo journalctl -u flowai-ict-bot -f${NC}"
                 echo ""
+                echo -e "${YELLOW}Auto-Update Commands:${NC}"
+                echo -e "${WHITE}• Telegram: /update (check for updates)${NC}"
+                echo -e "${WHITE}• Telegram: /confirm_update (apply updates)${NC}"
+                echo -e "${WHITE}• Manual: bash $INSTALL_DIR/scripts/update_bot.sh${NC}"
+                echo ""
                 echo -e "${YELLOW}Files:${NC}"
                 echo -e "${WHITE}• Installation: $INSTALL_DIR${NC}"
                 echo -e "${WHITE}• Configuration: $INSTALL_DIR/.env${NC}"
                 echo -e "${WHITE}• Logs: $INSTALL_DIR/logs/${NC}"
+                echo -e "${WHITE}• Update Script: $INSTALL_DIR/scripts/update_bot.sh${NC}"
                 echo ""
                 echo -e "${YELLOW}Features:${NC}"
                 echo -e "${WHITE}• ICT Methodology (Order Blocks, FVG, Liquidity)${NC}"
@@ -1601,6 +1648,7 @@ management_menu() {
                 echo -e "${WHITE}• Real-time BrsAPI Integration${NC}"
                 echo -e "${WHITE}• Advanced Risk Management${NC}"
                 echo -e "${WHITE}• Telegram Bot Interface${NC}"
+                echo -e "${WHITE}• Auto-Update System${NC}"
                 echo ""
                 echo -e "${YELLOW}Support:${NC}"
                 echo -e "${WHITE}• GitHub: https://github.com/behnamrjd/FlowAI-ICT-Trading-Bot${NC}"
