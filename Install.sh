@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =====================================================
-# FlowAI-ICT Trading Bot Complete Installer v4.0
+# FlowAI-ICT Trading Bot Complete Installer v4.3
 # Fixed All Issues + Complete Configuration
 # =====================================================
 
@@ -120,7 +120,7 @@ log_success() {
 print_banner() {
     clear
     echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.0                    ${NC}${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.3                    ${NC}${PURPLE}║${NC}"
     if [ "$INSTALLATION_EXISTS" = true ]; then
         echo -e "${PURPLE}║${WHITE}${BOLD}              Management & Status Panel                     ${NC}${PURPLE}║${NC}"
     else
@@ -892,7 +892,7 @@ if [ -d "venv" ] && [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
     echo "🐍 Python: $(python --version)"
     
-    if python -c "import telegram, pandas, numpy, ta" &>/dev/null; then
+    if "$INSTALL_DIR/venv/bin/python" -c "import telegram, pandas, numpy, ta" &>/dev/null; then
         echo "✅ Dependencies: All OK"
     else
         echo "❌ Dependencies: Some missing"
@@ -937,7 +937,7 @@ EOF
     local success_imports=()
     
     for import_name in "${critical_imports[@]}"; do
-        if python -c "import $import_name" >/dev/null 2>&1; then
+        if "$INSTALL_DIR/venv/bin/python" -c "import $import_name" >/dev/null 2>&1; then
             success_imports+=("$import_name")
         else
             failed_imports+=("$import_name")
@@ -945,7 +945,7 @@ EOF
     done
     
     # Test config import
-    if python -c "from flow_ai_core import config; config.validate_config()" >/dev/null 2>&1; then
+    if "$INSTALL_DIR/venv/bin/python" -c "from flow_ai_core import config; config.validate_config()" >/dev/null 2>&1; then
         success_imports+=("config")
     else
         failed_imports+=("config")
@@ -1137,7 +1137,7 @@ manage_service() {
                         local failed_tests=()
                         
                         for import_name in "${test_imports[@]}"; do
-                            if python -c "import $import_name" 2>/dev/null; then
+                            if "$INSTALL_DIR/venv/bin/python" -c "import $import_name" 2>/dev/null; then
                                 echo -e "${GREEN}✅ $import_name: Available${NC}"
                             else
                                 echo -e "${RED}❌ $import_name: Missing${NC}"
@@ -1146,7 +1146,7 @@ manage_service() {
                         done
                         
                         # Test config
-                        if python -c "from flow_ai_core import config; config.validate_config()" 2>/dev/null; then
+                        if "$INSTALL_DIR/venv/bin/python" -c "from flow_ai_core import config; config.validate_config()" 2>/dev/null; then
                             echo -e "${GREEN}✅ Configuration validation passed${NC}"
                         else
                             echo -e "${RED}❌ Configuration validation failed${NC}"
@@ -1405,7 +1405,7 @@ show_system_status() {
     if [ -d "$INSTALL_DIR/venv" ]; then
         cd "$INSTALL_DIR"
         source venv/bin/activate 2>/dev/null
-        if python -c "import telegram, pandas, numpy, ta" &>/dev/null; then
+        if "$INSTALL_DIR/venv/bin/python" -c "import telegram, pandas, numpy, ta" &>/dev/null; then
             echo -e "${GREEN}✅ Dependencies: All OK${NC}"
         else
             echo -e "${YELLOW}⚠ Dependencies: Some issues${NC}"
@@ -1577,3 +1577,5 @@ main() {
 
 # Run main function
 main "$@"
+
+[end of Install.sh]
