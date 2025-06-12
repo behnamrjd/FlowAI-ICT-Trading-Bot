@@ -1727,10 +1727,27 @@ if [[ -f "$BACKUP_DIR/.env" ]]; then
 fi
 
 # Update dependencies
+# Update dependencies with fixed versions
 log "Updating dependencies..."
 source venv/bin/activate || error_exit "Failed to activate venv"
 pip install --upgrade pip
-pip install numpy==1.26.4 pandas==2.0.3 python-telegram-bot==13.15 ta==0.10.2 urllib3==1.26.18 --upgrade
+
+# Force reinstall with exact versions to prevent conflicts
+pip uninstall python-telegram-bot -y
+pip install python-telegram-bot==13.15 --force-reinstall --no-deps
+pip install APScheduler==3.6.3 cachetools==4.2.2 certifi tornado==6.1
+
+# Install other dependencies with fixed versions
+pip install numpy==1.26.4 --force-reinstall
+pip install pandas==2.0.3 --force-reinstall  
+pip install ta==0.10.2 --force-reinstall
+pip install urllib3==1.26.18 --force-reinstall
+pip install python-dotenv==0.19.2 --force-reinstall
+pip install requests==2.28.2 --force-reinstall
+pip install psutil==5.9.8 --force-reinstall
+
+# Verify telegram installation
+python3 -c "import telegram; print('Telegram version:', telegram.__version__)" || error_exit "Telegram import failed"
 log "Dependencies updated"
 
 # Start service
