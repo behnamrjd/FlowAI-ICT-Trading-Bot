@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =====================================================
-# FlowAI-ICT Trading Bot Complete Installer v4.3
+# FlowAI-ICT Trading Bot Complete Installer v4.5
 # Fixed All Issues + Complete Configuration
 # =====================================================
 
@@ -120,7 +120,7 @@ log_success() {
 print_banner() {
     clear
     echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.3                    ${NC}${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${WHITE}${BOLD}              FlowAI-ICT Trading Bot v4.5                    ${NC}${PURPLE}║${NC}"
     if [ "$INSTALLATION_EXISTS" = true ]; then
         echo -e "${PURPLE}║${WHITE}${BOLD}              Management & Status Panel                     ${NC}${PURPLE}║${NC}"
     else
@@ -664,9 +664,6 @@ quick_install() {
     # Step 8: Complete Configuration (NEW)
     ((current++))
     print_step_simple "${steps[7]}" $current $total "running"
-    
-    # Create complete config.py with all ICT variables
-    create_complete_config "flow_ai_core/config.py"
     
     # Create .env file
     cat > .env << EOF
