@@ -167,9 +167,33 @@ NEWS_CACHE_TTL_SECONDS = get_env_var('NEWS_CACHE_TTL_SECONDS', 3600, var_type=in
 
 # ===== ADVANCED ICT PARAMETERS =====
 ICT_SWING_LOOKBACK_PERIODS = get_env_var('ICT_SWING_LOOKBACK_PERIODS', 10, var_type=int)
+ICT_SWING_HIGH_LOW_PERIODS = get_env_var('ICT_SWING_HIGH_LOW_PERIODS', 5, var_type=int)
+ICT_STRUCTURE_CONFIRMATION_PERIODS = get_env_var('ICT_STRUCTURE_CONFIRMATION_PERIODS', 3, var_type=int)
+
+# ===== ICT MSS (Market Structure Shift) =====
 ICT_MSS_SWING_LOOKBACK = get_env_var('ICT_MSS_SWING_LOOKBACK', 20, var_type=int)
+ICT_MSS_CONFIRMATION_PERIODS = get_env_var('ICT_MSS_CONFIRMATION_PERIODS', 3, var_type=int)
+ICT_MSS_MIN_BREAK_PERCENTAGE = get_env_var('ICT_MSS_MIN_BREAK_PERCENTAGE', 0.001, var_type=float)
+
+# ===== ICT BOS (Break of Structure) =====
+ICT_BOS_SWING_LOOKBACK = get_env_var('ICT_BOS_SWING_LOOKBACK', 15, var_type=int)
+ICT_BOS_CONFIRMATION_PERIODS = get_env_var('ICT_BOS_CONFIRMATION_PERIODS', 2, var_type=int)
+
+# ===== ICT CHoCH (Change of Character) =====
+ICT_CHOCH_LOOKBACK_PERIODS = get_env_var('ICT_CHOCH_LOOKBACK_PERIODS', 10, var_type=int)
+ICT_CHOCH_CONFIRMATION = get_env_var('ICT_CHOCH_CONFIRMATION', 3, var_type=int)
+
+# ===== ICT ORDER BLOCK SETTINGS =====
 ICT_OB_MIN_BODY_RATIO = get_env_var('ICT_OB_MIN_BODY_RATIO', 0.3, var_type=float)
+ICT_OB_MIN_SIZE = get_env_var('ICT_OB_MIN_SIZE', 0.0005, var_type=float)
+ICT_OB_MAX_LOOKBACK = get_env_var('ICT_OB_MAX_LOOKBACK', 20, var_type=int)
+ICT_OB_CONFIRMATION_PERIODS = get_env_var('ICT_OB_CONFIRMATION_PERIODS', 3, var_type=int)
+
+# ===== ICT PD ARRAY SETTINGS =====
 ICT_PD_ARRAY_LOOKBACK_PERIODS = get_env_var('ICT_PD_ARRAY_LOOKBACK_PERIODS', 50, var_type=int)
+ICT_PD_ARRAY_MIN_TOUCHES = get_env_var('ICT_PD_ARRAY_MIN_TOUCHES', 3, var_type=int)
+ICT_PD_ARRAY_CONFIRMATION = get_env_var('ICT_PD_ARRAY_CONFIRMATION', 2, var_type=int)
+
 # Minimum Fair Value Gap size as a decimal (e.g., 0.0003 for 0.03%)
 FVG_THRESHOLD = get_env_var('ICT_FVG_THRESHOLD', 0.0003, var_type=float)
 
@@ -184,6 +208,19 @@ try:
 except ValueError:
     logger.warning(f"Invalid format for ICT_PD_RETRACEMENT_LEVELS: '{ICT_PD_RETRACEMENT_LEVELS_STR}'. Using default values.")
     ICT_PD_RETRACEMENT_LEVELS = [float(x.strip()) for x in _default_retracement_levels_str.split(',')]
+
+# ===== ICT PD EXTENSION LEVELS =====
+_default_extension_levels_str = "1.272,1.414,1.618,2.0,2.618"
+ICT_PD_EXTENSION_LEVELS_STR = get_env_var('ICT_PD_EXTENSION_LEVELS', _default_extension_levels_str)
+ICT_PD_EXTENSION_LEVELS = []
+try:
+    if ICT_PD_EXTENSION_LEVELS_STR:
+        ICT_PD_EXTENSION_LEVELS = [float(x.strip()) for x in ICT_PD_EXTENSION_LEVELS_STR.split(',') if x.strip()]
+    if not ICT_PD_EXTENSION_LEVELS:
+        raise ValueError("Empty or invalid list")
+except ValueError:
+    logger.warning(f"Invalid format for ICT_PD_EXTENSION_LEVELS: '{ICT_PD_EXTENSION_LEVELS_STR}'. Using default values.")
+    ICT_PD_EXTENSION_LEVELS = [float(x.strip()) for x in _default_extension_levels_str.split(',')]
 
 # ===== ICT SPECIFIC CONFIGURATIONS =====
 class ICTConfig:
@@ -278,6 +315,18 @@ def validate_config():
         raise ValueError(f"Configuration validation failed: {', '.join(errors)}")
     
     logger.info("Configuration validation passed")
+    logger.info("FlowAI-ICT Configuration loaded successfully")
+    logger.info(f"ICT Strategy: {'Enabled' if ICT_ENABLED else 'Disabled'}")
+    logger.info(f"AI Model: {'Enabled' if AI_MODEL_ENABLED else 'Disabled'}")
+    logger.info(f"Admin IDs: {TELEGRAM_ADMIN_IDS}")
+    logger.info(f"Premium Users: {len(TELEGRAM_PREMIUM_USERS)}")
+    
+    if USD_IRR_EXCHANGE_RATE == 70000.0 and not os.getenv('USD_IRR_EXCHANGE_RATE'):
+        logger.warning("Using default USD_IRR_EXCHANGE_RATE of 70000.0. "
+                         "Please set USD_IRR_EXCHANGE_RATE in your .env file for accurate "
+                         "18K Gold price conversion if XAUUSD is unavailable.")
+    
+    return True
 
 # اجرای اعتبارسنجی
 try:
@@ -286,14 +335,3 @@ except ValueError as e:
     logger.error(f"Configuration validation failed: {e}")
     # در حالت production، ممکن است بخواهید برنامه را متوقف کنید
     # sys.exit(1)
-
-logger.info("FlowAI-ICT Configuration loaded successfully")
-logger.info(f"ICT Strategy: {'Enabled' if ICT_ENABLED else 'Disabled'}")
-logger.info(f"AI Model: {'Enabled' if AI_MODEL_ENABLED else 'Disabled'}")
-logger.info(f"Admin IDs: {TELEGRAM_ADMIN_IDS}")
-logger.info(f"Premium Users: {len(TELEGRAM_PREMIUM_USERS)}")
-
-if USD_IRR_EXCHANGE_RATE == 70000.0 and not os.getenv('USD_IRR_EXCHANGE_RATE'):
-    logger.warning("Using default USD_IRR_EXCHANGE_RATE of 70000.0. "
-                     "Please set USD_IRR_EXCHANGE_RATE in your .env file for accurate "
-                     "18K Gold price conversion if XAUUSD is unavailable.")
