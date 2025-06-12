@@ -2182,22 +2182,15 @@ main() {
     # Handle root user automatically
     handle_root_user
     
-    # Check installation status
-    check_installation
-    
-    # Setup auto-update system (اضافه شده)
-    create_update_script
-    add_telegram_update_handlers
-    
-    # Main loop
+    # Main loop - بدون auto-update setup
     while true; do
-        # Re-check installation status
+        # Check installation status
         check_installation
         
         if [ "$INSTALLATION_EXISTS" = true ]; then
             management_menu
         else
-            install_menu
+            install_menu  # اینجا منوی نصب نمایش داده می‌شود
         fi
     done
 }
