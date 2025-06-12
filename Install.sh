@@ -1576,5 +1576,3 @@ main() {
 main "$@"
 
 [end of Install.sh]
-
-[end of Install.sh]
