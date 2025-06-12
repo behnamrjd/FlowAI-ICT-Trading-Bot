@@ -1672,6 +1672,22 @@ create_update_script() {
     cd "$INSTALL_DIR"
     mkdir -p scripts
     
+    # Create version lock file
+    cat > scripts/requirements-lock.txt << 'LOCK_EOF'
+python-telegram-bot==13.15
+APScheduler==3.6.3
+cachetools==4.2.2
+certifi==2022.12.7
+tornado==6.1
+numpy==1.26.4
+pandas==2.0.3
+ta==0.10.2
+urllib3==1.26.18
+python-dotenv==0.19.2
+requests==2.28.2
+psutil==5.9.8
+LOCK_EOF
+    
     cat > "$UPDATE_SCRIPT_PATH" << 'EOF'
 #!/bin/bash
 # FlowAI-ICT Bot Auto Update Script
@@ -1702,6 +1718,13 @@ echo $$ > "$LOCK_FILE"
 
 log "=== FlowAI-ICT Bot Update Started ==="
 
+# Check current telegram version before update
+log "Checking current telegram version..."
+cd "$BOT_DIR"
+source venv/bin/activate
+CURRENT_TG_VERSION=$(python3 -c "import telegram; print(telegram.__version__)" 2>/dev/null || echo "unknown")
+log "Current telegram version: $CURRENT_TG_VERSION"
+
 # Create backup
 mkdir -p "$BACKUP_DIR"
 if [[ -f "$BOT_DIR/.env" ]]; then
@@ -1726,7 +1749,6 @@ if [[ -f "$BACKUP_DIR/.env" ]]; then
     log "Configuration restored"
 fi
 
-# Update dependencies
 # Update dependencies with fixed versions
 log "Updating dependencies..."
 source venv/bin/activate || error_exit "Failed to activate venv"
@@ -1748,7 +1770,19 @@ pip install psutil==5.9.8 --force-reinstall
 
 # Verify telegram installation
 python3 -c "import telegram; print('Telegram version:', telegram.__version__)" || error_exit "Telegram import failed"
+
 log "Dependencies updated"
+
+# Verify installation after update
+log "Verifying installation..."
+python3 -c "
+import telegram
+import pandas
+import numpy
+import ta
+print('✓ All imports successful')
+print('✓ Telegram version:', telegram.__version__)
+" || error_exit "Post-update verification failed"
 
 # Start service
 log "Starting bot service..."
