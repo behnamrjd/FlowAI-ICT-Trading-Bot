@@ -97,27 +97,66 @@ error_exit() {
 
 # Initialize log files with proper permissions
 init_logs() {
-    # Create log files with proper permissions
-    touch "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG" 2>/dev/null || {
-        echo "⚠️ Warning: Could not create log files in /tmp, using current directory"
-        LOG_FILE="./flowai-install.log"
-        ERROR_LOG="./flowai-errors.log"
-        UPDATE_LOG="./flowai-update.log"
-        touch "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG"
+    # Try to create log files in /tmp first, then fallback to user home
+    local temp_log_dir="/tmp"
+    local user_log_dir="$HOME"
+    local current_log_dir="."
+    
+    # Test write permissions for different directories
+    if [[ -w "$temp_log_dir" ]]; then
+        LOG_FILE="$temp_log_dir/flowai-install.log"
+        ERROR_LOG="$temp_log_dir/flowai-errors.log"
+        UPDATE_LOG="$temp_log_dir/flowai-update.log"
+    elif [[ -w "$user_log_dir" ]]; then
+        LOG_FILE="$user_log_dir/flowai-install.log"
+        ERROR_LOG="$user_log_dir/flowai-errors.log"
+        UPDATE_LOG="$user_log_dir/flowai-update.log"
+    else
+        # Create logs directory in current location
+        mkdir -p logs 2>/dev/null || true
+        if [[ -w "logs" ]]; then
+            LOG_FILE="logs/flowai-install.log"
+            ERROR_LOG="logs/flowai-errors.log"
+            UPDATE_LOG="logs/flowai-update.log"
+        else
+            LOG_FILE="./flowai-install.log"
+            ERROR_LOG="./flowai-errors.log"
+            UPDATE_LOG="./flowai-update.log"
+        fi
+    fi
+    
+    # Create log files with proper error handling
+    {
+        touch "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG" 2>/dev/null
+    } || {
+        # Final fallback - create in /tmp with unique names
+        LOG_FILE="/tmp/flowai-install-$$.log"
+        ERROR_LOG="/tmp/flowai-errors-$$.log"
+        UPDATE_LOG="/tmp/flowai-update-$$.log"
+        touch "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG" 2>/dev/null || {
+            echo "⚠️ Warning: Cannot create log files, logging disabled"
+            LOG_FILE="/dev/null"
+            ERROR_LOG="/dev/null"
+            UPDATE_LOG="/dev/null"
+        }
     }
     
-    # Initialize log files
-    echo "=== FlowAI-ICT Installation Log Started: $(date) ===" > "$LOG_FILE"
-    echo "=== FlowAI-ICT Error Log Started: $(date) ===" > "$ERROR_LOG"
-    echo "=== FlowAI-ICT Update Log Started: $(date) ===" > "$UPDATE_LOG"
-    
-    # Set proper permissions
-    chmod 644 "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG" 2>/dev/null || true
-    
-    echo "📝 Log files initialized:"
-    echo "   Install: $LOG_FILE"
-    echo "   Errors:  $ERROR_LOG"
-    echo "   Updates: $UPDATE_LOG"
+    # Initialize log files if they're writable
+    if [[ -w "$LOG_FILE" ]]; then
+        echo "=== FlowAI-ICT Installation Log Started: $(date) ===" > "$LOG_FILE"
+        echo "=== FlowAI-ICT Error Log Started: $(date) ===" > "$ERROR_LOG"
+        echo "=== FlowAI-ICT Update Log Started: $(date) ===" > "$UPDATE_LOG"
+        
+        # Set proper permissions
+        chmod 644 "$LOG_FILE" "$ERROR_LOG" "$UPDATE_LOG" 2>/dev/null || true
+        
+        echo "📝 Log files initialized:"
+        echo "   Install: $LOG_FILE"
+        echo "   Errors:  $ERROR_LOG"
+        echo "   Updates: $UPDATE_LOG"
+    else
+        echo "⚠️ Warning: Logging disabled due to permission issues"
+    fi
 }
 
 # Check if installation exists
