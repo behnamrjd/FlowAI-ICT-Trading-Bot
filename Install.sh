@@ -255,7 +255,26 @@ check_prerequisites() {
 
 # Check installation status
 check_installation() {
-    if [[ -d "$INSTALL_DIR" ]] && [[ -f "$INSTALL_DIR/.env" ]] && [[ -f "$SERVICE_FILE" ]] && systemctl list-unit-files | grep -q "$SERVICE_NAME"; then
+    # بررسی وجود دایرکتوری نصب
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        INSTALLATION_EXISTS=false
+        return
+    fi
+    
+    # بررسی وجود فایل .env
+    if [[ ! -f "$INSTALL_DIR/.env" ]]; then
+        INSTALLATION_EXISTS=false
+        return
+    fi
+    
+    # بررسی وجود فایل service
+    if [[ ! -f "$SERVICE_FILE" ]]; then
+        INSTALLATION_EXISTS=false
+        return
+    fi
+    
+    # بررسی وجود service در systemd (اصلاح شده)
+    if systemctl list-unit-files "$SERVICE_NAME.service" &>/dev/null; then
         INSTALLATION_EXISTS=true
     else
         INSTALLATION_EXISTS=false
@@ -1543,6 +1562,8 @@ main() {
     while true; do
         # Check installation status
         check_installation
+        
+        echo "DEBUG: INSTALLATION_EXISTS = $INSTALLATION_EXISTS" # Debug line
         
         if [ "$INSTALLATION_EXISTS" = true ]; then
             management_menu
