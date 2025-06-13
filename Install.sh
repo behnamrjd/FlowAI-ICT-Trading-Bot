@@ -429,7 +429,7 @@ automated_installation() {
     # Install exact versions to prevent conflicts
     print_step "Installing telegram bot with exact version..."
     pip uninstall python-telegram-bot -y 2>/dev/null || true
-    if ! pip install python-telegram-bot==13.15 --force-reinstall --no-deps; then
+    if ! pip install python-telegram-bot>=20.0 --upgrade; then
         error_exit "Failed to install python-telegram-bot"
     fi
     
@@ -712,7 +712,7 @@ if [[ -f "venv/bin/activate" ]]; then
     
     # Force reinstall with exact versions to prevent conflicts
     pip uninstall python-telegram-bot -y
-    pip install python-telegram-bot==13.15 --force-reinstall --no-deps
+    pip install python-telegram-bot>=20.0 --upgrade
     pip install APScheduler==3.6.3 cachetools==4.2.2 certifi tornado==6.1
     
     # Install other dependencies with fixed versions
