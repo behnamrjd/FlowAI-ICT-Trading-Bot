@@ -607,10 +607,10 @@ EOF
     echo -e "${GREEN}✅ You can now start using your FlowAI-ICT Trading Bot!${NC}"
     echo ""
     
-    # Ask to continue to management menu
-    echo -e "${YELLOW}Press Enter to continue to management menu...${NC}"
-    read -r
-    return 0
+    # Continue to management menu automatically
+    echo -e "${YELLOW}Continuing to management menu...${NC}"
+    sleep 2
+    # No return - let main loop continue
 }
 
 # Setup auto-update system - All issues fixed
