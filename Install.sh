@@ -361,6 +361,7 @@ quick_configuration() {
 }
 
 # Bulletproof automated installation - All issues fixed
+# Bulletproof automated installation - All issues fixed
 automated_installation() {
     echo -e "${GREEN}Starting automated installation...${NC}"
     echo ""
@@ -448,6 +449,7 @@ automated_installation() {
         "python-dotenv==0.19.2"
         "requests==2.28.2"
         "psutil==5.9.8"
+        "pytz"
     )
     
     for dep in "${dependencies[@]}"; do
@@ -462,7 +464,7 @@ automated_installation() {
         error_exit "Telegram import verification failed"
     fi
     
-    if ! python3 -c "import pandas, numpy, ta; print('✓ All core libraries imported successfully')"; then
+    if ! python3 -c "import pandas, numpy, ta, pytz; print('✓ All core libraries imported successfully')"; then
         error_exit "Core libraries verification failed"
     fi
     
@@ -472,8 +474,8 @@ automated_installation() {
     print_step "Creating configuration file..."
     cat > .env << EOF || error_exit "Failed to create configuration file"
 # FlowAI-ICT Bot Configuration
-TELEGRAM_TOKEN=$TELEGRAM_TOKEN
-ADMIN_ID=$ADMIN_ID
+TELEGRAM_BOT_TOKEN=$TELEGRAM_TOKEN
+TELEGRAM_ADMIN_IDS=$ADMIN_ID
 
 # Trading Configuration
 RISK_PERCENTAGE=2
