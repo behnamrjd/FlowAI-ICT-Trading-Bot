@@ -603,7 +603,7 @@ setup_auto_update_system() {
     
     # Create version lock file
     cat > scripts/requirements-lock.txt << 'LOCK_EOF' || error_exit "Failed to create requirements lock"
-python-telegram-bot==13.15
+python-telegram-bot>=20.0
 APScheduler==3.6.3
 cachetools==4.2.2
 certifi==2022.12.7
@@ -615,6 +615,7 @@ urllib3==1.26.18
 python-dotenv==0.19.2
 requests==2.28.2
 psutil==5.9.8
+pytz
 LOCK_EOF
     
     # Create bulletproof update script
@@ -725,6 +726,7 @@ if [[ -f "venv/bin/activate" ]]; then
     pip install python-dotenv==0.19.2 --force-reinstall
     pip install requests==2.28.2 --force-reinstall
     pip install psutil==5.9.8 --force-reinstall
+    pip install pytz --force-reinstall
     
     # Verify telegram installation
     python3 -c "import telegram; print('✓ Telegram version:', telegram.__version__)" || error_exit "Telegram import failed"
@@ -740,8 +742,10 @@ import telegram
 import pandas
 import numpy
 import ta
+import pytz
 print('✓ All imports successful')
 print('✓ Telegram version:', telegram.__version__)
+print('✓ pytz version:', pytz.__version__)
 " || error_exit "Post-update verification failed"
 
 # Start service
@@ -773,70 +777,6 @@ echo "✅ Update completed! Bot is running with latest version."
 EOF
     
     chmod +x scripts/update_bot.sh || error_exit "Failed to set update script permissions"
-    
-    # Add telegram update handlers to bot if file exists
-    if [[ -f telegram_bot.py ]]; then
-        # Check if update handlers already exist
-        if ! grep -q "update_command" telegram_bot.py; then
-            cat >> telegram_bot.py << 'EOF'
-
-# Auto-update functionality
-import subprocess
-import os
-
-async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /update command"""
-    user_id = update.effective_user.id
-    if str(user_id) != os.getenv('ADMIN_ID'):
-        await update.message.reply_text("❌ Unauthorized access!")
-        return
-    
-    await update.message.reply_text("🔄 Checking for updates...")
-    
-    try:
-        # Check for updates
-        result = subprocess.run(['git', 'fetch', 'origin', 'main'], 
-                              capture_output=True, text=True, cwd='/opt/FlowAI-ICT-Trading-Bot')
-        
-        if result.returncode == 0:
-            # Check if updates available
-            result = subprocess.run(['git', 'rev-list', '--count', 'HEAD..origin/main'], 
-                                  capture_output=True, text=True, cwd='/opt/FlowAI-ICT-Trading-Bot')
-            
-            if result.stdout.strip() == '0':
-                await update.message.reply_text("✅ Bot is already up to date!")
-            else:
-                await update.message.reply_text(f"🔄 {result.stdout.strip()} updates available!\n\nSend /confirm_update to apply updates.")
-        else:
-            await update.message.reply_text("❌ Failed to check for updates!")
-            
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error checking updates: {str(e)}")
-
-async def confirm_update_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /confirm_update command"""
-    user_id = update.effective_user.id
-    if str(user_id) != os.getenv('ADMIN_ID'):
-        await update.message.reply_text("❌ Unauthorized access!")
-        return
-    
-    await update.message.reply_text("🔄 Starting update process...\n⚠️ Bot will restart automatically!")
-    
-    try:
-        # Run update script
-        subprocess.Popen(['bash', '/opt/FlowAI-ICT-Trading-Bot/scripts/update_bot.sh'], 
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-    except Exception as e:
-        await update.message.reply_text(f"❌ Failed to start update: {str(e)}")
-
-# Add handlers to application
-if 'application' in locals():
-    application.add_handler(CommandHandler("update", update_command))
-    application.add_handler(CommandHandler("confirm_update", confirm_update_command))
-EOF
-        fi
-    fi
     
     print_success "Auto-update system configured"
 }
