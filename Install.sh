@@ -1480,8 +1480,6 @@ management_menu() {
                         fi
                         ;;
                     2)
-                        echo -e "${
-                    2)
                         echo -e "${CYAN}Available backups:${NC}"
                         ls -la /tmp/flowai-backup-* 2>/dev/null || echo "No backups found"
                         ;;
