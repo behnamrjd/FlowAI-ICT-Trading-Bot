@@ -193,7 +193,7 @@ check_prerequisites() {
     # Check and install python3-venv
     if ! dpkg -l | grep -q python3.*-venv 2>/dev/null; then
         print_warning "python3-venv not found, installing..."
-        if apt update && apt install python3-venv python3.12-venv -y; then
+        if sudo apt update && sudo apt install python3-venv python3.12-venv -y; then
             print_success "python3-venv installed successfully"
         else
             error_exit "Failed to install python3-venv"
@@ -239,7 +239,7 @@ check_prerequisites() {
         print_success "pip module detected (will use python3 -m pip)"
     else
         print_warning "pip3 not found, installing..."
-        if apt update && apt install python3-pip -y; then
+        if sudo apt update && sudo apt install python3-pip -y; then
             print_success "pip3 installed successfully"
         else
             print_warning "Failed to install pip3, will use python3 -m pip"
