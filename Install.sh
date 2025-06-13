@@ -207,6 +207,15 @@ check_prerequisites() {
     fi
     print_success "Python $python_version detected"
     
+    # Check python3-venv package
+    if ! dpkg -l | grep -q python3.*-venv; then
+        print_warning "python3-venv not found, installing..."
+        apt update && apt install python3-venv python3.12-venv -y || error_exit "Failed to install python3-venv"
+        print_success "python3-venv installed successfully"
+    else
+        print_success "python3-venv detected"
+    fi
+    
     # Check disk space (minimum 1GB)
     local available_space=$(df /opt 2>/dev/null | awk 'NR==2 {print $4}' || echo "1000000")
     if [[ $available_space -lt 1000000 ]]; then
